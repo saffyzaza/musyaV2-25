@@ -1,18 +1,26 @@
 import type { ChatRouteRequest, AgentStep } from "@/app/chat/chatTypes";
 import healthCrew from "@/app/crew/healthCrew";
-import { runCrew } from "@/app/crew/runner";
+import { runCrew, type ModelConfig } from "@/app/crew/runner";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const APP_TITLE = "Musya Chat";
 
+const DEFAULT_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-4o-mini";
+
+const MODELS: ModelConfig = {
+  orchestrator: process.env.OPENROUTER_MODEL_ORCHESTRATOR ?? DEFAULT_MODEL,
+  domain:       process.env.OPENROUTER_MODEL_DOMAIN       ?? DEFAULT_MODEL,
+  synthesizer:  process.env.OPENROUTER_MODEL_SYNTHESIZER  ?? DEFAULT_MODEL,
+  tool:         process.env.OPENROUTER_MODEL_TOOL         ?? DEFAULT_MODEL,
+};
+
 // ─── LLM caller ───────────────────────────────────────────────────────────────
 
-async function callLLM(systemPrompt: string, userPrompt: string): Promise<string> {
+async function callLLM(systemPrompt: string, userPrompt: string, model: string): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY!;
 
   const res = await fetch(OPENROUTER_URL, {
@@ -24,7 +32,7 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
       "X-Title": APP_TITLE,
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       temperature: 0.4,
       messages: [
         { role: "system", content: systemPrompt },
@@ -86,7 +94,7 @@ export async function POST(request: Request) {
 
         // Run crew — each agent makes its own real LLM call (CrewAI sequential process)
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-        for await (const event of runCrew(healthCrew, { query }, callLLM, appUrl)) {
+        for await (const event of runCrew(healthCrew, { query }, callLLM, appUrl, MODELS)) {
           if (event.type === "crew_plan") {
             send({ type: "crew_plan", agents: event.agents });
           } else if (event.type === "task_start") {

@@ -10,9 +10,16 @@ export type CrewEvent =
   | { type: "task_done"; agent: Agent; task: Task; output: TaskOutput }
   | { type: "crew_done"; result: CrewOutput };
 
+export type ModelConfig = {
+  orchestrator: string; // Orchestrator task
+  domain: string;       // Domain agent — first reasoning call
+  synthesizer: string;  // Synthesizer task
+  tool: string;         // ReAct loop after tool result (cheap+fast)
+};
+
 type LLMMessage = { role: "system" | "user" | "assistant"; content: string };
-type LLMCaller = (systemPrompt: string, userPrompt: string) => Promise<string>;
-type LLMMultiTurn = (messages: LLMMessage[]) => Promise<string>;
+type LLMCaller = (systemPrompt: string, userPrompt: string, model: string) => Promise<string>;
+type LLMMultiTurn = (messages: LLMMessage[], model: string) => Promise<string>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -129,14 +136,23 @@ function buildUserPrompt(
 
 // ─── ReAct execution loop (Reason → Act → Observe → repeat) ──────────────────
 
+function getAgentModel(agentName: string, models: ModelConfig): string {
+  if (agentName === "Orchestrator") return models.orchestrator;
+  if (agentName === "Synthesizer")  return models.synthesizer;
+  return models.domain;
+}
+
 async function executeWithTools(
   agent: Agent,
   systemPrompt: string,
   initialUserPrompt: string,
   callMultiTurn: LLMMultiTurn,
   appUrl: string,
+  models: ModelConfig,
   maxIterations = 5,
 ): Promise<{ rawOutput: string; toolsUsed: string[] }> {
+  const agentModel = getAgentModel(agent.name, models);
+
   const messages: LLMMessage[] = [
     { role: "system", content: systemPrompt },
     { role: "user", content: initialUserPrompt },
@@ -144,9 +160,13 @@ async function executeWithTools(
 
   const toolsUsed: string[] = [];
   let lastOutput = "";
+  let isFirstCall = true;
 
   for (let i = 0; i < maxIterations; i++) {
-    lastOutput = await callMultiTurn(messages);
+    // First reasoning: use full agent model. ReAct continuations: use cheap tool model.
+    const model = isFirstCall ? agentModel : models.tool;
+    isFirstCall = false;
+    lastOutput = await callMultiTurn(messages, model);
 
     const toolCall = parseToolCall(lastOutput);
     if (!toolCall) break; // No tool call → agent is done
@@ -184,20 +204,20 @@ export async function* runCrew(
   inputs: Record<string, string>,
   callLLM: LLMCaller,
   appUrl: string,
+  models: ModelConfig,
 ): AsyncGenerator<CrewEvent> {
   const completedOutputs = new Map<Task, TaskOutput>();
   let dynamicTasks: Task[] = [...crew.tasks];
   let planSent = false;
 
-  // Wrap callLLM for multi-turn (ReAct loop)
-  const callMultiTurn: LLMMultiTurn = async (messages) => {
+  // Wrap callLLM for multi-turn (ReAct loop) — model is chosen per call
+  const callMultiTurn: LLMMultiTurn = async (messages, model) => {
     const sys = messages.find((m) => m.role === "system")?.content ?? "";
     const userMsgs = messages.filter((m) => m.role !== "system");
-    // For multi-turn, concatenate conversation as a single user message
     const combined = userMsgs
       .map((m) => `[${m.role.toUpperCase()}]: ${m.content}`)
       .join("\n\n---\n\n");
-    return callLLM(sys, combined);
+    return callLLM(sys, combined, model);
   };
 
   for (let taskIndex = 0; taskIndex < dynamicTasks.length; taskIndex++) {
@@ -243,6 +263,7 @@ export async function* runCrew(
       userPrompt,
       callMultiTurn,
       appUrl,
+      models,
     );
 
     const taskOutput = parseTaskOutput(currentTask, rawOutput, toolsUsed);
