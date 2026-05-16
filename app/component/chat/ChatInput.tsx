@@ -97,7 +97,10 @@ export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
                 sessionId,
                 status: "completed",
                 error: undefined,
-                messages: [...getChatSessionState(sessionId).messages, createChatSessionMessage("ai", payload.message)],
+                messages: [
+                    ...getChatSessionState(sessionId).messages,
+                    createChatSessionMessage("ai", payload.message, payload.agentSteps),
+                ],
                 lastUserPrompt: trimmedMessage,
             });
         } catch (error) {

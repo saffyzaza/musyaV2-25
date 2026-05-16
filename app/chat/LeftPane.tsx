@@ -1,81 +1,358 @@
 "use client";
-import { useSyncExternalStore } from "react";
+import { useSyncExternalStore, useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 import clsx from "clsx";
+import { HiOutlineSparkles, HiOutlineLightBulb } from "react-icons/hi";
+import { FiSearch, FiCpu, FiTool, FiChevronDown, FiChevronRight } from "react-icons/fi";
 
-import type { ChatSessionState } from "./chatTypes";
+import type { ChatSessionState, AgentStep } from "./chatTypes";
 import { createEmptyChatSessionState, getChatSessionState, subscribeToChatSession } from "./chatSessionStore";
+import { MarkdownContent } from "../component/chat/MarkdownContent";
 
 const PREVIEW_SESSION: ChatSessionState = createEmptyChatSessionState("preview-session");
 
-export const LeftPane = () => {
-    const params = useParams<{ sessionId?: string }>();
-    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : null;
-    const session = useSyncExternalStore(
-        (onStoreChange) => subscribeToChatSession(sessionId, onStoreChange),
-        () => {
-            if (!sessionId) {
-                return PREVIEW_SESSION;
-            }
+type AgentConfig = {
+  color: string;
+  bg: string;
+  border: string;
+  dot: string;
+  letter: string;
+};
 
-            return getChatSessionState(sessionId);
-        },
-        () => PREVIEW_SESSION,
-    );
+const AGENT_CONFIG: Record<string, AgentConfig> = {
+  Orchestrator: {
+    color: "text-violet-700",
+    bg: "bg-violet-50",
+    border: "border-violet-200",
+    dot: "bg-violet-500",
+    letter: "O",
+  },
+  "Research Agent": {
+    color: "text-blue-700",
+    bg: "bg-blue-50",
+    border: "border-blue-200",
+    dot: "bg-blue-500",
+    letter: "R",
+  },
+  Synthesizer: {
+    color: "text-emerald-700",
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    dot: "bg-emerald-500",
+    letter: "S",
+  },
+};
 
-    return (
-        <div className="flex-1 h-full border-r border-gray-200 p-4 bg-white shrink-0 shadow-sm overflow-y-auto rounded-lg flex flex-col">
-            <div className="mb-4">
-                <h2 className="text-lg font-bold text-gray-800">Left Content</h2>
-                {sessionId ? (
-                    <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
-                        <span>Session: {sessionId}</span>
-                        <span
-                            className={clsx(
-                                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-                                session.status === "completed" && "bg-emerald-50 text-emerald-600",
-                                session.status === "running" && "bg-amber-50 text-amber-600",
-                                session.status === "failed" && "bg-rose-50 text-rose-600",
-                                session.status === "idle" && "bg-slate-100 text-slate-500",
-                            )}
-                        >
-                            {session.status}
-                        </span>
-                    </div>
-                ) : null}
-            </div>
-            
-            <div className="flex flex-col space-y-4">
-                {session.messages.length ? session.messages.map((msg) => (
-                    msg.role === "user" ? (
-                        <div key={msg.id} className="flex flex-col items-end">
-                            <div className="bg-[#eb6f45f1] text-white px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-sm shadow-sm leading-relaxed whitespace-pre-wrap">
-                                {msg.text}
-                            </div>
-                            <span className="text-xs text-gray-400 mt-1 mr-1">{msg.timestamp}</span>
-                        </div>
-                    ) : (
-                        <div key={msg.id} className="flex flex-col items-start">
-                            <div className="bg-gray-50 border border-gray-200 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] text-sm shadow-sm leading-relaxed whitespace-pre-wrap">
-                                {msg.text}
-                            </div>
-                            <span className="text-xs text-gray-400 mt-1 ml-1">{msg.timestamp}</span>
-                        </div>
-                    )
-                )) : (
-                    <div className="rounded-2xl border border-dashed border-[#f0dfd8] bg-[#fcfbf9] p-5 text-sm leading-relaxed text-gray-500">
-                        {sessionId
-                            ? "เริ่มพิมพ์คำถามด้านล่างเพื่อเริ่มสนทนาใน session นี้"
-                            : "สร้าง session ใหม่โดยพิมพ์ข้อความในช่องแชตด้านล่าง"}
-                    </div>
-                )}
-            </div>
+const TOOL_ICONS: Record<string, string> = {
+  knowledge_search: "🔍",
+  data_analysis: "📊",
+  clinical_guidelines: "📋",
+  statistics_tool: "📈",
+  nutrition_database: "🥗",
+  disease_surveillance: "🦠",
+};
 
-            {session.error ? (
-                <div className="mt-6 rounded-2xl bg-[#fff4f2] p-3 text-sm text-[#a04222] ring-1 ring-[#f0dfd8]">
-                    {session.error}
-                </div>
-            ) : null}
+function AgentIcon({ agentName }: { agentName: string }) {
+  if (agentName === "Orchestrator") return <HiOutlineLightBulb size={10} />;
+  if (agentName === "Research Agent") return <FiSearch size={9} />;
+  if (agentName === "Synthesizer") return <HiOutlineSparkles size={10} />;
+  return <FiCpu size={9} />;
+}
+
+function AgentStepCard({ step, isLast }: { step: AgentStep; isLast: boolean }) {
+  const [open, setOpen] = useState(false);
+  const cfg: AgentConfig = AGENT_CONFIG[step.agentName] ?? {
+    color: "text-gray-700",
+    bg: "bg-gray-50",
+    border: "border-gray-200",
+    dot: "bg-gray-500",
+    letter: "?",
+  };
+
+  return (
+    <div className="relative">
+      {!isLast && <div className="absolute left-[9px] top-6 bottom-0 w-px bg-gray-200 z-0" />}
+
+      <div className="relative z-10 flex gap-2.5">
+        <div
+          className={clsx(
+            "w-[19px] h-[19px] rounded-full flex items-center justify-center shrink-0 mt-0.5 border-2 border-white shadow-sm text-white",
+            cfg.dot,
+          )}
+        >
+          <AgentIcon agentName={step.agentName} />
         </div>
-    );
+
+        <div className="flex-1 min-w-0 pb-1">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-2 w-full text-left group py-0.5"
+          >
+            <span className={clsx("text-xs font-semibold leading-none", cfg.color)}>{step.agentName}</span>
+            <span className="text-[10px] text-gray-400 leading-none">{step.agentRole}</span>
+            <span className="ml-auto text-gray-300 group-hover:text-gray-500 transition-colors shrink-0">
+              {open ? <FiChevronDown size={11} /> : <FiChevronRight size={11} />}
+            </span>
+          </button>
+
+          {!open && step.result && (
+            <p className="text-[11px] text-gray-400 mt-0.5 truncate">{step.result}</p>
+          )}
+
+          {open && (
+            <div className="mt-1.5 space-y-1.5">
+              {step.thinking && (
+                <div className="bg-gray-50 rounded-lg p-2 border border-gray-100">
+                  <div className="text-[10px] font-medium text-gray-400 mb-1 flex items-center gap-1">
+                    <span>💭</span>
+                    <span>ความคิด</span>
+                  </div>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">{step.thinking}</p>
+                </div>
+              )}
+
+              {step.tool && (
+                <div className={clsx("rounded-lg p-2 border", cfg.bg, cfg.border)}>
+                  <div className={clsx("text-[10px] font-semibold mb-1.5 flex items-center gap-1.5", cfg.color)}>
+                    <FiTool size={9} />
+                    <span>
+                      {TOOL_ICONS[step.tool.name] ?? "🔧"} {step.tool.displayName}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Input</span>
+                      <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">
+                        {step.tool.input}
+                      </p>
+                    </div>
+                    <div>
+                      <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Output</span>
+                      <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">
+                        {step.tool.output}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step.result && (
+                <div className="flex items-start gap-1.5">
+                  <span className="text-emerald-500 text-xs shrink-0 mt-0.5 font-bold">✓</span>
+                  <p className="text-[11px] text-gray-600 leading-relaxed">{step.result}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {!isLast && <div className="h-2.5" />}
+    </div>
+  );
+}
+
+function AgentPipeline({ steps, messageId }: { steps: AgentStep[]; messageId: string }) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="mb-2.5 rounded-xl border border-gray-200 bg-white overflow-hidden shadow-sm w-full">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50/80 hover:bg-gray-100/60 transition-colors"
+      >
+        <div className="flex -space-x-1 shrink-0">
+          {steps.slice(0, 3).map((step, i) => {
+            const cfg = AGENT_CONFIG[step.agentName];
+            return (
+              <div
+                key={i}
+                className={clsx(
+                  "w-4 h-4 rounded-full border-2 border-white flex items-center justify-center text-white text-[7px] font-bold shadow-sm",
+                  cfg?.dot ?? "bg-gray-400",
+                )}
+              >
+                {cfg?.letter ?? "?"}
+              </div>
+            );
+          })}
+        </div>
+        <span className="text-xs font-semibold text-gray-600">Agent Pipeline</span>
+        <span className="text-[10px] bg-emerald-50 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">
+          {steps.length} agents · เสร็จแล้ว
+        </span>
+        <span className="ml-auto text-gray-400 shrink-0">
+          {expanded ? <FiChevronDown size={12} /> : <FiChevronRight size={12} />}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="px-3 pt-2.5 pb-2">
+          {steps.map((step, i) => (
+            <AgentStepCard key={`${messageId}-${i}`} step={step} isLast={i === steps.length - 1} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentRunningIndicator() {
+  return (
+    <div className="rounded-xl border border-amber-100 bg-amber-50/80 p-3 w-full max-w-[95%]">
+      <div className="flex items-center gap-2 mb-2.5">
+        <div className="flex gap-1">
+          {[0, 150, 300].map((delay) => (
+            <div
+              key={delay}
+              className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-bounce"
+              style={{ animationDelay: `${delay}ms` }}
+            />
+          ))}
+        </div>
+        <span className="text-xs font-medium text-amber-700">Agent กำลังทำงาน...</span>
+      </div>
+      <div className="space-y-1.5 pl-1">
+        {(["Orchestrator", "Research Agent", "Synthesizer"] as const).map((name, i) => {
+          const cfg = AGENT_CONFIG[name];
+          return (
+            <div key={name} className="flex items-center gap-2">
+              <div
+                className={clsx(
+                  "w-1.5 h-1.5 rounded-full",
+                  i === 0 ? `${cfg.dot} animate-pulse` : "bg-gray-200",
+                )}
+              />
+              <span className="text-[11px] text-gray-500">{name}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export const LeftPane = () => {
+  const params = useParams<{ sessionId?: string }>();
+  const sessionId = typeof params?.sessionId === "string" ? params.sessionId : null;
+  const session = useSyncExternalStore(
+    (onStoreChange) => subscribeToChatSession(sessionId, onStoreChange),
+    () => (sessionId ? getChatSessionState(sessionId) : PREVIEW_SESSION),
+    () => PREVIEW_SESSION,
+  );
+
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [session.messages.length, session.status]);
+
+  return (
+    <div className="flex-1 h-full border-r border-gray-200 bg-white shrink-0 shadow-sm rounded-lg flex flex-col overflow-hidden">
+      {/* Header */}
+      <div className="px-4 pt-3.5 pb-3 border-b border-gray-100 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full bg-violet-500" />
+            <div className="w-2 h-2 rounded-full bg-blue-500" />
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+          </div>
+          <h2 className="text-sm font-semibold text-gray-700">Multi-Agent Chat</h2>
+          {sessionId && (
+            <span
+              className={clsx(
+                "ml-auto rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                session.status === "completed" && "bg-emerald-50 text-emerald-600",
+                session.status === "running" && "bg-amber-50 text-amber-600",
+                session.status === "failed" && "bg-rose-50 text-rose-600",
+                session.status === "idle" && "bg-slate-100 text-slate-500",
+              )}
+            >
+              {session.status}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        {session.messages.length === 0 ? (
+          <div className="h-full flex items-center justify-center">
+            <div className="text-center py-8">
+              <div className="flex justify-center gap-2 mb-3">
+                {(["O", "R", "S"] as const).map((letter, i) => (
+                  <div
+                    key={i}
+                    className={clsx(
+                      "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold",
+                      i === 0 && "bg-violet-100 text-violet-600",
+                      i === 1 && "bg-blue-100 text-blue-600",
+                      i === 2 && "bg-emerald-100 text-emerald-600",
+                    )}
+                  >
+                    {letter}
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-gray-500">
+                {sessionId
+                  ? "เริ่มพิมพ์คำถามด้านล่างเพื่อเริ่มสนทนา"
+                  : "สร้าง session ใหม่โดยพิมพ์ข้อความในช่องแชตด้านล่าง"}
+              </p>
+              <p className="text-[11px] text-gray-400 mt-1">Orchestrator · Research Agent · Synthesizer</p>
+            </div>
+          </div>
+        ) : (
+          <>
+            {session.messages.map((msg) =>
+              msg.role === "user" ? (
+                <div key={msg.id} className="flex flex-col items-end">
+                  <div className="bg-[#eb6f45f1] text-white px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-sm shadow-sm leading-relaxed">
+                    {msg.text}
+                  </div>
+                  <span className="text-xs text-gray-400 mt-1 mr-1">{msg.timestamp}</span>
+                </div>
+              ) : (
+                <div key={msg.id} className="flex flex-col items-start w-full">
+                  {msg.agentSteps && msg.agentSteps.length > 0 && (
+                    <div className="w-full max-w-[95%]">
+                      <AgentPipeline steps={msg.agentSteps} messageId={msg.id} />
+                    </div>
+                  )}
+
+                  <div className="bg-gray-50 border border-gray-200 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[95%] shadow-sm">
+                    {msg.agentSteps && msg.agentSteps.length > 0 && (
+                      <div className="flex items-center gap-1.5 mb-2 pb-2 border-b border-gray-100">
+                        <HiOutlineSparkles size={11} className="text-emerald-500" />
+                        <span className="text-[10px] font-semibold text-emerald-600 uppercase tracking-wide">
+                          Final Answer
+                        </span>
+                      </div>
+                    )}
+                    <MarkdownContent text={msg.text} />
+                  </div>
+
+                  <span className="text-xs text-gray-400 mt-1 ml-1">{msg.timestamp}</span>
+                </div>
+              ),
+            )}
+
+            {session.status === "running" && (
+              <div className="flex flex-col items-start">
+                <AgentRunningIndicator />
+              </div>
+            )}
+          </>
+        )}
+
+        {session.error && (
+          <div className="rounded-2xl bg-[#fff4f2] p-3 text-sm text-[#a04222] ring-1 ring-[#f0dfd8]">
+            {session.error}
+          </div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  );
 };
