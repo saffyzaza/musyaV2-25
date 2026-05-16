@@ -15,6 +15,7 @@ import {
 } from "../../chat/chatSessionStore";
 import {
     setStreamingSteps,
+    setPlannedAgents,
     clearStreamingState,
     getStreamingSteps,
 } from "../../chat/streamingStore";
@@ -116,7 +117,9 @@ export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
                         continue;
                     }
 
-                    if (event.type === "agent_start") {
+                    if (event.type === "crew_plan") {
+                        setPlannedAgents(sessionId, event.agents as { name: string; role: string }[]);
+                    } else if (event.type === "agent_start") {
                         const current = getStreamingSteps(sessionId) ?? [];
                         const newStep: AgentStep = {
                             agentName: event.agentName as string,

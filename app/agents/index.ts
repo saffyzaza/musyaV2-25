@@ -1,19 +1,24 @@
 import orchestrator from "./orchestrator";
 import researchAgent from "./researchAgent";
 import synthesizer from "./synthesizer";
-import type { AgentDefinition, AgentVisual } from "./types";
+import { DOMAIN_AGENTS } from "./domains";
 
-export type { AgentDefinition, AgentVisual };
+export type { Agent, Task, Crew, TaskOutput, CrewOutput, AgentVisual, ToolDefinition } from "./types";
+export { DOMAIN_AGENTS, DOMAIN_LIST } from "./domains";
 
-// Pipeline execution order
-export const AGENTS: AgentDefinition[] = [orchestrator, researchAgent, synthesizer];
+export const CORE_AGENTS = { orchestrator, researchAgent, synthesizer };
 
-// Lookup by name
-export const AGENT_MAP: Record<string, AgentDefinition> = Object.fromEntries(
-  AGENTS.map((a) => [a.name, a]),
-);
+// All agents (core + domains) — used by agentConfig for visual lookup
+export const AGENT_MAP = {
+  ...Object.fromEntries(Object.values(CORE_AGENTS).map((a) => [a.name, a])),
+  ...DOMAIN_AGENTS,
+};
 
-// Flat list for pipeline slots (name + role only)
-export const PIPELINE_AGENTS = AGENTS.map((a) => ({ name: a.name, role: a.role }));
+// Default 3-slot pipeline (before crew_plan tells us the actual domain agent)
+export const PIPELINE_AGENTS = [
+  { name: orchestrator.name, role: orchestrator.role },
+  { name: "Domain Expert",   role: "ผู้เชี่ยวชาญเฉพาะด้าน" },
+  { name: synthesizer.name,  role: synthesizer.role },
+];
 
 export { orchestrator, researchAgent, synthesizer };
