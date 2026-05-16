@@ -23,7 +23,10 @@
       "Bash(git checkout *)",
       "Bash(git commit -m 'revert: remove all CSV Finder features, restore pre-CSV-Finder state *)",
       "Bash(git commit -m 'refactor: extract agent UI into separate components *)",
-      "Bash(git commit -m 'refactor: separate tool components into app/component/tool/ *)"
+      "Bash(git commit -m 'refactor: separate tool components into app/component/tool/ *)",
+      "Bash(git commit -m 'refactor: define each agent as its own file in app/agents/ *)",
+      "Bash(git commit -m 'feat: redesign entire system as CrewAI-style multi-agent framework *)",
+      "Bash(git commit -m 'feat: 8 domain agents with dynamic crew routing *)"
     ]
   }
 }

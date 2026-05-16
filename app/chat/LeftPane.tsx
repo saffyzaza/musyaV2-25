@@ -6,7 +6,7 @@ import { HiOutlineSparkles } from "react-icons/hi";
 
 import type { ChatSessionState } from "./chatTypes";
 import { createEmptyChatSessionState, getChatSessionState, subscribeToChatSession } from "./chatSessionStore";
-import { getStreamingSteps, subscribeToStreamingState } from "./streamingStore";
+import { getStreamingSteps, getPlannedAgents, subscribeToStreamingState } from "./streamingStore";
 import { MarkdownContent } from "../component/chat/MarkdownContent";
 import { LiveAgentPipeline } from "../component/agent/LiveAgentPipeline";
 import { DoneAgentPipeline } from "../component/agent/DoneAgentPipeline";
@@ -26,6 +26,12 @@ export const LeftPane = () => {
   const streamingSteps = useSyncExternalStore(
     (onChange) => subscribeToStreamingState(sessionId, onChange),
     () => (sessionId ? getStreamingSteps(sessionId) : null),
+    () => null,
+  );
+
+  const plannedAgents = useSyncExternalStore(
+    (onChange) => subscribeToStreamingState(sessionId, onChange),
+    () => (sessionId ? getPlannedAgents(sessionId) : null),
     () => null,
   );
 
@@ -121,7 +127,7 @@ export const LeftPane = () => {
             {session.status === "running" && streamingSteps !== null && (
               <div className="flex flex-col items-start w-full">
                 <div className="w-full max-w-[95%]">
-                  <LiveAgentPipeline streamingSteps={streamingSteps} />
+                  <LiveAgentPipeline streamingSteps={streamingSteps} plannedAgents={plannedAgents} />
                 </div>
               </div>
             )}

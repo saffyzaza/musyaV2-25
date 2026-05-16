@@ -1,11 +1,17 @@
 "use client";
 import type { AgentStep } from "@/app/chat/chatTypes";
-import { PIPELINE_AGENTS } from "./agentConfig";
+import type { PlannedAgent } from "@/app/chat/streamingStore";
+import { PIPELINE_AGENTS } from "@/app/agents";
 import { LiveStepCard } from "./LiveStepCard";
 
-type Props = { streamingSteps: AgentStep[] };
+type Props = {
+  streamingSteps: AgentStep[];
+  plannedAgents: PlannedAgent[] | null;
+};
 
-export function LiveAgentPipeline({ streamingSteps }: Props) {
+export function LiveAgentPipeline({ streamingSteps, plannedAgents }: Props) {
+  // Use crew_plan agents if received, otherwise default 3-slot pipeline
+  const slots = plannedAgents ?? PIPELINE_AGENTS;
   const doneCount = streamingSteps.filter((s) => s.status === "done").length;
 
   return (
@@ -22,12 +28,12 @@ export function LiveAgentPipeline({ streamingSteps }: Props) {
         </div>
         <span className="text-xs font-semibold text-amber-700">Agent Pipeline กำลังทำงาน...</span>
         <span className="ml-auto text-[10px] text-amber-500">
-          {doneCount} / {PIPELINE_AGENTS.length}
+          {doneCount} / {slots.length}
         </span>
       </div>
 
       <div className="px-3 pt-2.5 pb-2">
-        {PIPELINE_AGENTS.map((agentDef, i) => {
+        {slots.map((agentDef, i) => {
           const step = streamingSteps.find((s) => s.agentName === agentDef.name);
           return (
             <LiveStepCard
@@ -35,7 +41,7 @@ export function LiveAgentPipeline({ streamingSteps }: Props) {
               agentName={agentDef.name}
               agentRole={agentDef.role}
               step={step}
-              isLast={i === PIPELINE_AGENTS.length - 1}
+              isLast={i === slots.length - 1}
             />
           );
         })}

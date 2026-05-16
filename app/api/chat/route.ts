@@ -86,7 +86,9 @@ export async function POST(request: Request) {
 
         // Run crew — each agent makes its own real LLM call (CrewAI sequential process)
         for await (const event of runCrew(healthCrew, { query }, callLLM)) {
-          if (event.type === "task_start") {
+          if (event.type === "crew_plan") {
+            send({ type: "crew_plan", agents: event.agents });
+          } else if (event.type === "task_start") {
             send({
               type: "agent_start",
               agentName: event.agent.name,

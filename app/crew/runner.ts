@@ -1,6 +1,10 @@
 import type { Crew, Task, TaskOutput, CrewOutput, Agent } from "@/app/agents/types";
+import { DOMAIN_AGENTS } from "@/app/agents/domains";
+
+export type PlannedAgent = { name: string; role: string };
 
 export type CrewEvent =
+  | { type: "crew_plan"; agents: PlannedAgent[] }
   | { type: "task_start"; agent: Agent; task: Task }
   | { type: "task_done"; agent: Agent; task: Task; output: TaskOutput }
   | { type: "crew_done"; result: CrewOutput };
@@ -57,14 +61,16 @@ function buildAgentPrompt(
 
 // ─── Output parser ────────────────────────────────────────────────────────────
 
+function parseDomainFromOutput(output: string): string | null {
+  const match = output.match(/\[DOMAIN:\s*([^\]]+)\]/i);
+  return match ? match[1].trim() : null;
+}
+
 function parseTaskOutput(task: Task, rawOutput: string): TaskOutput {
-  // Extract tool reference [TOOL: name] if present
   const toolMatch = rawOutput.match(/\[TOOL:\s*([^\]]+)\]/i);
   const toolName = toolMatch ? toolMatch[1].trim() : undefined;
-  const result = rawOutput.replace(/\[TOOL:[^\]]+\]/gi, "").trim();
+  const result = rawOutput.replace(/\[DOMAIN:[^\]]+\]/gi, "").replace(/\[TOOL:[^\]]+\]/gi, "").trim();
 
-  // Split off a short "thinking" preamble if the agent wrote one
-  // Pattern: first paragraph before actual content
   const lines = result.split("\n");
   const thinkingEnd = lines.findIndex(
     (l, i) => i > 0 && (l.startsWith("#") || l.startsWith("-") || l.startsWith("|")),
@@ -93,25 +99,61 @@ export async function* runCrew(
 ): AsyncGenerator<CrewEvent> {
   const completedOutputs = new Map<Task, TaskOutput>();
 
-  for (const task of crew.tasks) {
-    // Gather context from tasks this one depends on
+  // We'll resolve the domain agent after the Orchestrator task runs.
+  // Start with a placeholder plan using the first task's agent names.
+  let dynamicTasks: Task[] = [...crew.tasks];
+  let planSent = false;
+
+  for (let taskIndex = 0; taskIndex < dynamicTasks.length; taskIndex++) {
+    const task = dynamicTasks[taskIndex];
+
+    // Gather context
     const contextOutputs = (task.context ?? [])
-      .map((dep) => completedOutputs.get(dep))
+      .map((dep) => {
+        // Find the matching completed task by description (since tasks may be cloned)
+        for (const [completedTask, output] of completedOutputs) {
+          if (completedTask.description === dep.description) return output;
+        }
+        return undefined;
+      })
       .filter(Boolean) as TaskOutput[];
 
-    yield { type: "task_start", agent: task.agent, task };
+    // After Orchestrator runs, determine domain agent and send crew_plan
+    if (taskIndex === 1 && !planSent) {
+      const orchestratorOutput = Array.from(completedOutputs.values())[0];
+      const domainKey = orchestratorOutput ? parseDomainFromOutput(orchestratorOutput.rawOutput) : null;
+      const domainAgent = domainKey ? DOMAIN_AGENTS[domainKey] : null;
 
-    const { system, user } = buildAgentPrompt(task, contextOutputs, inputs);
+      if (domainAgent) {
+        // Swap task[1] agent to the matched domain agent
+        dynamicTasks = dynamicTasks.map((t, i) =>
+          i === 1 ? { ...t, agent: domainAgent } : t,
+        );
+      }
+
+      // Send crew_plan so UI can show the actual pipeline
+      const plannedAgents: PlannedAgent[] = dynamicTasks.map((t) => ({
+        name: t.agent.name,
+        role: t.agent.role,
+      }));
+      yield { type: "crew_plan", agents: plannedAgents };
+      planSent = true;
+    }
+
+    // Re-fetch current task (might have been updated)
+    const currentTask = dynamicTasks[taskIndex];
+
+    yield { type: "task_start", agent: currentTask.agent, task: currentTask };
+
+    const { system, user } = buildAgentPrompt(currentTask, contextOutputs, inputs);
     const rawOutput = await callLLM(system, user);
-    const taskOutput = parseTaskOutput(task, rawOutput);
+    const taskOutput = parseTaskOutput(currentTask, rawOutput);
 
-    completedOutputs.set(task, taskOutput);
-
-    yield { type: "task_done", agent: task.agent, task, output: taskOutput };
+    completedOutputs.set(currentTask, taskOutput);
+    yield { type: "task_done", agent: currentTask.agent, task: currentTask, output: taskOutput };
   }
 
-  // Final answer = last task's result
-  const lastTask = crew.tasks[crew.tasks.length - 1];
+  const lastTask = dynamicTasks[dynamicTasks.length - 1];
   const lastOutput = completedOutputs.get(lastTask);
 
   yield {
