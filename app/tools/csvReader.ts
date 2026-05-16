@@ -56,9 +56,10 @@ const csvReader: ExecutableTool = {
 
     // ⑤ Source header — shown to LLM and user so data can be verified
     const fileUrl = `/api/files/${file_id}`;
-    const sourceLine = fileMeta
-      ? `📄 SOURCE FILE: [${fileMeta.name}](${fileUrl}) | path: ${fileMeta.path} | URL: ${fileUrl}`
-      : `📄 SOURCE FILE: [ID:${file_id}](${fileUrl}) | URL: ${fileUrl}`;
+    const displayName = fileMeta?.name ?? `file-${file_id}`;
+    const sourceLine =
+      `📄 ชื่อไฟล์: ${displayName}\n` +
+      `🔗 MARKDOWN_LINK (คัดลอกตรงนี้ลงในแหล่งที่มา): [${displayName}](${fileUrl})`;
 
     const filterNote =
       filtered.length === 0

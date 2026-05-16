@@ -98,11 +98,11 @@ const multiCsvReader: ExecutableTool = {
       totalRowsFound += filtered.length;
 
       const sourceName = meta?.name ?? `ID:${file_id}`;
-      const sourcePath = meta ? ` | path: ${meta.path}` : "";
       const fileUrl = `/api/files/${file_id}`;
 
       sections.push(
-        `📄 SOURCE: [${sourceName}](${fileUrl})${sourcePath} | URL: ${fileUrl}\n` +
+        `📄 ชื่อไฟล์: ${sourceName}\n` +
+        `🔗 MARKDOWN_LINK (คัดลอกตรงนี้ลงในแหล่งที่มา): [${sourceName}](${fileUrl})\n` +
         `   คอลัมน์ (${headers.length}): ${headers.join(" | ")}\n` +
         `   ${note} → ${filtered.length} แถว (จาก ${dataLines.length} ทั้งหมด)\n` +
         `   ${headers.join(",")}\n` +
