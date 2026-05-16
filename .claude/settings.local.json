@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"H:\\\\projectmusya\\\\.claude\\\\worktrees\\\\xenodochial-dirac-b1bac9\" -Recurse -Directory)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(gh pr create --title 'feat: multi-agent chat UI with markdown, tables, and charts' --body ' *)",
+      "Bash(git credential *)",
+      "Bash(cd /d H:\\\\projectmusya\\\\.claude\\\\worktrees\\\\xenodochial-dirac-b1bac9)",
+      "Bash(dir /s /b app)",
+      "Bash(git commit -m 'feat: add CSV Finder agent — searches MinIO, injects CSV data into LLM context *)",
+      "Bash(git commit -m 'fix: smart CSV filtering — match rows by query keywords instead of first-N only *)",
+      "Bash(git commit -m 'feat: CSV Finder 2-step ReAct — AI scans headers then decides columns+filter *)",
+      "Bash(git commit -m 'feat: Research Agent thinks in Python pandas code *)",
+      "Bash(git commit -m 'feat: add Code Agent — writes Python pandas code as dedicated pipeline step *)",
+      "Bash(git revert *)",
+      "Bash(git commit -m 'fix: filter CSV files by filename relevance before fetching content *)",
+      "Bash(git commit -m 'feat: AI infers domain from folder+filename to pick relevant CSV files *)",
+      "Bash(git fetch *)",
+      "Bash(git rebase *)",
+      "Bash(git checkout *)",
+      "Bash(git commit -m 'revert: remove all CSV Finder features, restore pre-CSV-Finder state *)",
+      "Bash(git commit -m 'refactor: extract agent UI into separate components *)",
+      "Bash(git commit -m 'refactor: separate tool components into app/component/tool/ *)"
+    ]
+  }
+}

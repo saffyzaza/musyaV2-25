@@ -10,24 +10,47 @@ const APP_TITLE = "Musya Chat";
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   knowledge_search: "ค้นหาความรู้สุขภาพ",
-  data_analysis: "วิเคราะห์ข้อมูล CSV",
+  data_analysis: "วิเคราะห์ข้อมูล",
   clinical_guidelines: "แนวทางทางคลินิก",
   statistics_tool: "วิเคราะห์สถิติสาธารณสุข",
   nutrition_database: "ฐานข้อมูลโภชนาการ",
   disease_surveillance: "ระบบเฝ้าระวังโรค",
 };
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
+const SYSTEM_PROMPT = `คุณคือระบบ Multi-Agent AI ช่วยงานด้านสุขภาพและข้อมูลสาธารณสุข
+
+ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความนอก JSON:
+{
+  "orchestrator_thinking": "วิเคราะห์คำถามสั้นๆ: ผู้ใช้ถามเรื่อง X ต้องการข้อมูลประเภท Y",
+  "orchestrator_delegation": "มอบหมายให้ Research Agent ค้นหาข้อมูลเรื่อง X ด้วย tool Y",
+  "researcher_thinking": "กำลังค้นหาข้อมูลที่เกี่ยวข้องกับ X",
+  "researcher_tool": "knowledge_search",
+  "researcher_tool_input": "คำค้นหาหรือข้อมูลที่ input เข้า tool",
+  "researcher_findings": "สรุปข้อมูลที่พบจาก tool อย่างย่อ 1-2 ประโยค",
+  "synthesizer_thinking": "รวบรวมข้อมูลจาก Research Agent เพื่อสรุปเป็นคำตอบ",
+  "synthesizer_summary": "คำตอบสรุปสั้นๆ 1 ประโยค",
+  "finalAnswer": "คำตอบฉบับสมบูรณ์ในรูปแบบ Markdown ที่อ่านง่าย ถ้ามีข้อมูลเชิงตัวเลขให้แสดงเป็นตาราง ถ้ามีขั้นตอนให้แสดงเป็น list"
+}
+
+researcher_tool ต้องเป็นหนึ่งใน: knowledge_search, data_analysis, clinical_guidelines, statistics_tool, nutrition_database, disease_surveillance
+
+กรณีคำถามเกี่ยวกับอาการรุนแรงหรือวินิจฉัยโรค: ให้แนะนำพบแพทย์ใน finalAnswer`;
+
+function buildConfigurationError() {
+  return [
+    "ยังไม่ได้ตั้งค่า OpenRouter สำหรับแชต AI",
+    "เพิ่ม OPENROUTER_API_KEY ในไฟล์ .env.local แล้ว restart dev server",
+  ].join("\n");
+}
 
 function getMessageContent(data: unknown): string {
-  const content = (data as { choices?: Array<{ message?: { content?: unknown } }> })
-    ?.choices?.[0]?.message?.content;
+  const content = (data as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((p) => {
-        if (typeof p === "string") return p;
-        if (p && typeof p === "object" && "text" in p) return String((p as { text?: unknown }).text ?? "");
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object" && "text" in part) return String((part as { text?: unknown }).text ?? "");
         return "";
       })
       .join("\n");
@@ -185,6 +208,41 @@ function fetchFilteredRows(
   return { filteredHeaders, filteredRows, matchedCount: matched.length };
 }
 
+// ─── Filename relevance scoring ───────────────────────────────────────────────
+
+// Thai keyword → English synonyms likely to appear in filenames
+const SEMANTIC_MAP: [string, string[]][] = [
+  ["ฆ่าตัวตาย", ["suicide", "suicid", "self-harm"]],
+  ["อุบัติเหตุ", ["accident", "road", "crash", "injury"]],
+  ["มะเร็ง", ["cancer", "tumor"]],
+  ["โรคติดต่อ", ["infectious", "communicable", "disease"]],
+  ["เบาหวาน", ["diabetes"]],
+  ["ความดัน", ["hypertension", "blood_pressure"]],
+  ["หัวใจ", ["heart", "cardiac", "cardiovascular"]],
+  ["ปอด", ["lung", "pulmonary", "respiratory"]],
+  ["ไต", ["kidney", "renal"]],
+  ["สุขภาพ", ["health", "medical"]],
+  ["มุกดาหาร", ["mukdahan"]],
+  ["อุบล", ["ubon"]],
+  ["เชียงใหม่", ["chiangmai", "chiang_mai"]],
+  ["กรุงเทพ", ["bangkok"]],
+  ["ระยอง", ["rayong"]],
+  ["ภูเก็ต", ["phuket"]],
+];
+
+function scoreFileRelevance(file: StoredFile, queryKeywords: string[], query: string): number {
+  const text = (file.name + " " + (file.path ?? "")).toLowerCase();
+  const queryLower = query.toLowerCase();
+
+  // Expand Thai terms to English equivalents
+  const expandedTerms = [...queryKeywords];
+  for (const [thai, english] of SEMANTIC_MAP) {
+    if (queryLower.includes(thai)) expandedTerms.push(...english);
+  }
+
+  return expandedTerms.reduce((score, term) => score + (text.includes(term.toLowerCase()) ? 1 : 0), 0);
+}
+
 // ─── Main CSV Finder ──────────────────────────────────────────────────────────
 
 async function findCsvFiles(query: string): Promise<{
@@ -195,7 +253,6 @@ async function findCsvFiles(query: string): Promise<{
   let findError = "";
   const allReasonings: string[] = [];
   const toolDetails: string[] = [];
-  let domainAnalysis: FileDomainResult = { file_domains: {}, relevant_file_ids: [], reasoning: "" };
 
   try {
     const listRes = await fetch(`${APP_URL}/api/files`);
@@ -207,7 +264,26 @@ async function findCsvFiles(query: string): Promise<{
         (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
       );
 
-      for (const file of csvFiles.slice(0, 3)) {
+      // Score each CSV by filename relevance to the query
+      const keywords = query
+        .replace(/[()[\]{}'"""'']/g, " ")
+        .split(/[\s,]+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 2);
+
+      const scored = allCsvFiles
+        .map((f) => ({ file: f, score: scoreFileRelevance(f, keywords, query) }))
+        .sort((a, b) => b.score - a.score);
+
+      // Only pick files with score > 0; if none match, pick nothing (no irrelevant CSV)
+      const relevant = scored.filter((s) => s.score > 0).slice(0, 2);
+      const csvFiles = relevant.length > 0 ? relevant.map((s) => s.file) : [];
+
+      console.log(
+        `[CSV Finder] scored: ${scored.map((s) => `${s.file.name}(${s.score})`).join(", ")} → selected: ${csvFiles.map((f) => f.name).join(", ") || "none"}`,
+      );
+
+      for (const file of csvFiles) {
         try {
           // Step 1: scan headers
           const { headers, allLines } = await scanCsvHeaders(file.id);
@@ -249,31 +325,25 @@ async function findCsvFiles(query: string): Promise<{
     findError = "เกิดข้อผิดพลาดในการค้นหาไฟล์";
   }
 
-  // Build domain summary for display
-  const domainLines = Object.entries(domainAnalysis.file_domains)
-    .map(([id, domain]) => {
-      const f = files.find((x) => x.id === id) ?? { name: id };
-      return `• ${f.name}: ${domain}`;
-    })
-    .join("\n");
-
   const csvFinderStep: AgentStep = {
     agentName: "CSV Finder",
     agentRole: "ค้นหาและโหลดไฟล์ข้อมูล",
     thinking:
       files.length > 0
-        ? `① AI วิเคราะห์ domain จากชื่อโฟลเดอร์/ไฟล์ทุกไฟล์\n${domainLines}\n\n② เลือกเฉพาะไฟล์ที่ตรงกับคำถาม: ${files.map((f) => f.name).join(", ")}\n③ สแกน headers → AI เลือกคอลัมน์ → กรองแถว`
-        : `① AI วิเคราะห์ domain ของไฟล์ทั้งหมด\n${domainLines || "ไม่พบไฟล์ CSV"}\n\n② ${findError || "ไม่มีไฟล์ที่เกี่ยวข้องกับคำถามนี้"}`,
+        ? `① สแกน headers ของ ${files.length} ไฟล์ CSV\n② AI ดูคอลัมน์แล้วตัดสินใจ: ${allReasonings.join(" | ")}\n③ กรองแถวและเลือกเฉพาะคอลัมน์ที่เกี่ยวข้อง`
+        : findError || "ไม่พบไฟล์ CSV ในระบบ",
     tool: {
       name: "analyze_and_fetch",
-      displayName: "AI วิเคราะห์ domain → เลือกไฟล์ → ดึงข้อมูล",
-      input: `วิเคราะห์ domain จาก path+filename:\n${domainLines || "ไม่พบไฟล์ CSV"}\n\nเหตุผล: ${domainAnalysis.reasoning}`,
-      output: files.length > 0 ? toolDetails.join("\n") : "ไม่มีไฟล์ที่เกี่ยวข้อง",
+      displayName: "AI วิเคราะห์ columns → ดึงข้อมูลเฉพาะส่วน",
+      input: files.length > 0
+        ? `Headers ที่สแกนพบ: ${files.map((f, i) => `[${toolDetails[i]?.split(":")[0]}] ${f.headers.join(", ")}`).join(" | ")}`
+        : "ค้นหาไฟล์ CSV ใน MinIO",
+      output: files.length > 0 ? toolDetails.join("\n") : "ไม่พบไฟล์ CSV",
     },
     result:
       files.length > 0
         ? `ได้ข้อมูลจาก ${files.length} ไฟล์ — ส่งให้ Orchestrator วิเคราะห์`
-        : "ไม่มีไฟล์ CSV ที่เกี่ยวข้อง ใช้ความรู้ทั่วไปแทน",
+        : "ไม่พบไฟล์ CSV ใช้ความรู้ทั่วไปแทน",
     status: "done",
   };
 
@@ -348,49 +418,81 @@ type ParsedAgentResult = {
   synthesizerStep: AgentStep;
 };
 
-function parseMultiAgentResponse(content: string, hasCsv: boolean): ParsedAgentResult {
-  const fallback = (msg: string): ParsedAgentResult => ({
-    message: msg,
-    orchestratorStep: { agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน", thinking: "วิเคราะห์คำถาม", result: "มอบหมายให้ Research Agent" },
-    researchStep: {
-      agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
-      thinking: hasCsv ? "วิเคราะห์ข้อมูล CSV" : "ค้นหาข้อมูล",
-      tool: { name: hasCsv ? "data_analysis" : "knowledge_search", displayName: hasCsv ? "วิเคราะห์ข้อมูล CSV" : "ค้นหาความรู้", input: "คำถามของผู้ใช้", output: msg.slice(0, 120) },
-      result: "รวบรวมข้อมูลเรียบร้อย",
+function parseMultiAgentResponse(content: string): ParsedAgentResult {
+  const fallback = (message: string): ParsedAgentResult => ({
+    message,
+    orchestratorStep: {
+      agentName: "Orchestrator",
+      agentRole: "วิเคราะห์และประสานงาน",
+      thinking: "วิเคราะห์คำถามและมอบหมายงาน",
+      result: "มอบหมายให้ Research Agent ค้นหาข้อมูล",
     },
-    synthesizerStep: { agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบ", thinking: "สรุปคำตอบ", result: "เสร็จแล้ว" },
+    researchStep: {
+      agentName: "Research Agent",
+      agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
+      thinking: "ค้นหาข้อมูลที่เกี่ยวข้อง",
+      tool: { name: "knowledge_search", displayName: "ค้นหาความรู้สุขภาพ", input: "คำถามของผู้ใช้", output: message.slice(0, 120) },
+      result: "พบข้อมูลที่เกี่ยวข้องแล้ว",
+    },
+    synthesizerStep: {
+      agentName: "Synthesizer",
+      agentRole: "สรุปและจัดรูปแบบคำตอบ",
+      thinking: "รวบรวมข้อมูลและจัดรูปแบบคำตอบ",
+      result: "คำตอบพร้อมแล้ว",
+    },
   });
 
   try {
-    const p = parseJson<Record<string, string>>(content);
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/```\s*([\s\S]*?)\s*```/);
+    const jsonStr = jsonMatch ? jsonMatch[1] : content;
+    const p = JSON.parse(jsonStr.trim()) as Record<string, string>;
+
     if (!p.finalAnswer) return fallback(content);
+
     return {
       message: p.finalAnswer,
-      orchestratorStep: { agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน", thinking: p.orchestrator_thinking || "", result: p.orchestrator_delegation || "" },
+      orchestratorStep: {
+        agentName: "Orchestrator",
+        agentRole: "วิเคราะห์และประสานงาน",
+        thinking: p.orchestrator_thinking || "",
+        result: p.orchestrator_delegation || "",
+      },
       researchStep: {
-        agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
+        agentName: "Research Agent",
+        agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
         thinking: p.researcher_thinking || "",
         tool: p.researcher_tool
-          ? { name: p.researcher_tool, displayName: TOOL_DISPLAY_NAMES[p.researcher_tool] || p.researcher_tool, input: p.researcher_tool_input || "", output: p.researcher_findings || "" }
+          ? {
+              name: p.researcher_tool,
+              displayName: TOOL_DISPLAY_NAMES[p.researcher_tool] || p.researcher_tool,
+              input: p.researcher_tool_input || "",
+              output: p.researcher_findings || "",
+            }
           : null,
         result: p.researcher_findings || "",
       },
-      synthesizerStep: { agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ", thinking: p.synthesizer_thinking || "", result: p.synthesizer_summary || "" },
+      synthesizerStep: {
+        agentName: "Synthesizer",
+        agentRole: "สรุปและจัดรูปแบบคำตอบ",
+        thinking: p.synthesizer_thinking || "",
+        result: p.synthesizer_summary || "",
+      },
     };
   } catch {
     return fallback(content);
   }
 }
 
-// ─── POST handler ─────────────────────────────────────────────────────────────
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export async function POST(request: Request) {
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (data: object) =>
+      const send = (data: object) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
 
       try {
         const body = (await request.json()) as ChatRouteRequest;
@@ -398,68 +500,93 @@ export async function POST(request: Request) {
 
         if (!body.sessionId || !prompt) {
           send({ type: "error", message: "sessionId and prompt are required" });
+          controller.close();
           return;
         }
+
         if (!process.env.OPENROUTER_API_KEY) {
-          send({ type: "error", message: "ยังไม่ได้ตั้งค่า OPENROUTER_API_KEY ใน .env.local" });
+          send({ type: "error", message: buildConfigurationError() });
+          controller.close();
           return;
         }
 
-        // 1. CSV Finder starts immediately
-        send({ type: "agent_start", agentName: "CSV Finder", agentRole: "ค้นหาและโหลดไฟล์ข้อมูล" });
-
-        // 2. Scan → AI analyzes columns → fetch filtered rows
-        const { files: csvFiles, csvFinderStep } = await findCsvFiles(prompt);
-        send({ type: "agent_done", step: csvFinderStep });
-        await sleep(300);
-
-        // 3. Orchestrator
+        // 1. Orchestrator starts immediately (before LLM call — gives instant feedback)
         send({ type: "agent_start", agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน" });
 
-        const csvContext = formatCsvContext(csvFiles);
+        // 2. Call LLM
         const historyText = formatHistory(body.history ?? []);
         const fullPrompt = [
-          historyText ? `บริบทก่อนหน้า:\n${historyText}` : "",
-          `คำถามล่าสุด: ${prompt}`,
-        ].filter(Boolean).join("\n\n");
+          historyText ? `บริบทการสนทนาก่อนหน้า:\n${historyText}` : "",
+          `คำถามล่าสุดของผู้ใช้: ${prompt}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n");
 
-        const raw = await callLLM([
-          { role: "system", content: buildSystemPrompt(csvContext) },
-          { role: "user", content: fullPrompt },
-        ]);
+        const apiKey = process.env.OPENROUTER_API_KEY;
+        const response = await fetch(OPENROUTER_URL, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "HTTP-Referer": APP_URL,
+            "X-Title": APP_TITLE,
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            temperature: 0.4,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              { role: "user", content: fullPrompt },
+            ],
+          }),
+        });
 
-        const { message, orchestratorStep, researchStep, synthesizerStep } =
-          parseMultiAgentResponse(raw, csvFiles.length > 0);
+        const payload = (await response.json()) as unknown;
 
+        if (!response.ok) {
+          const errorMessage = (payload as { error?: { message?: string } })?.error?.message;
+          throw new Error(errorMessage || "OpenRouter request failed");
+        }
+
+        const content = getMessageContent(payload).trim();
+        if (!content) throw new Error("OpenRouter returned an empty response");
+
+        const { message, orchestratorStep, researchStep, synthesizerStep } = parseMultiAgentResponse(content);
+
+        // 3. Orchestrator done
         send({ type: "agent_done", step: { ...orchestratorStep, status: "done" } });
-        await sleep(300);
+        await sleep(350);
 
-        // 4. Research Agent
+        // 4. Research Agent starts
         send({ type: "agent_start", agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล" });
-        await sleep(900);
-        send({ type: "agent_done", step: { ...researchStep, status: "done" } });
-        await sleep(300);
+        await sleep(1100);
 
-        // 5. Synthesizer
+        // 5. Research Agent done
+        send({ type: "agent_done", step: { ...researchStep, status: "done" } });
+        await sleep(350);
+
+        // 6. Synthesizer starts
         send({ type: "agent_start", agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ" });
-        await sleep(700);
+        await sleep(750);
+
+        // 7. Synthesizer done
         send({ type: "agent_done", step: { ...synthesizerStep, status: "done" } });
         await sleep(200);
 
-        // 6. Final
+        // 8. Final answer
         send({
           type: "final",
           message,
           agentSteps: [
-            { ...csvFinderStep, status: "done" },
             { ...orchestratorStep, status: "done" },
             { ...researchStep, status: "done" },
             { ...synthesizerStep, status: "done" },
           ],
         });
       } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
         console.error("Chat SSE error:", error);
-        send({ type: "error", message: error instanceof Error ? error.message : "Unknown error" });
+        send({ type: "error", message });
       } finally {
         controller.close();
       }
@@ -467,6 +594,10 @@ export async function POST(request: Request) {
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive" },
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+    },
   });
 }
