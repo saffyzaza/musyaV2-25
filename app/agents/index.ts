@@ -1,19 +1,20 @@
 import orchestrator from "./orchestrator";
 import researchAgent from "./researchAgent";
 import synthesizer from "./synthesizer";
-import type { AgentDefinition, AgentVisual } from "./types";
 
-export type { AgentDefinition, AgentVisual };
+export type { Agent, Task, Crew, TaskOutput, CrewOutput, AgentVisual, ToolDefinition } from "./types";
 
-// Pipeline execution order
-export const AGENTS: AgentDefinition[] = [orchestrator, researchAgent, synthesizer];
+export const AGENTS = { orchestrator, researchAgent, synthesizer };
 
 // Lookup by name
-export const AGENT_MAP: Record<string, AgentDefinition> = Object.fromEntries(
-  AGENTS.map((a) => [a.name, a]),
+export const AGENT_MAP = Object.fromEntries(
+  Object.values(AGENTS).map((a) => [a.name, a]),
 );
 
-// Flat list for pipeline slots (name + role only)
-export const PIPELINE_AGENTS = AGENTS.map((a) => ({ name: a.name, role: a.role }));
+// Pipeline slot list for UI
+export const PIPELINE_AGENTS = Object.values(AGENTS).map((a) => ({
+  name: a.name,
+  role: a.role,
+}));
 
 export { orchestrator, researchAgent, synthesizer };

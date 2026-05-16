@@ -1,12 +1,15 @@
-import type { AgentDefinition } from "./types";
+import type { Agent } from "./types";
 
-const synthesizer: AgentDefinition = {
+const synthesizer: Agent = {
   name: "Synthesizer",
-  role: "สรุปและจัดรูปแบบคำตอบ",
-  description:
-    "Agent สุดท้ายที่รวบรวมข้อมูลจากทุก agent แล้วเรียบเรียงเป็นคำตอบที่ชัดเจน อ่านง่าย และครบถ้วน",
-  responsibility:
-    "① รับข้อมูลจาก Research Agent → ② รวบรวมและเรียบเรียง → ③ จัดรูปแบบเป็น Markdown พร้อม ตาราง/list → ④ ส่งคำตอบสุดท้ายให้ผู้ใช้",
+  role: "Health Communication Specialist",
+  goal:
+    "รวบรวมข้อมูลจากทุก agent และเรียบเรียงเป็นคำตอบที่ชัดเจน ถูกต้อง อ่านง่าย และเหมาะสมกับผู้ใช้",
+  backstory:
+    "คุณเป็น Health Communication Specialist ที่เชี่ยวชาญด้านการสื่อสารข้อมูลสุขภาพให้เข้าใจง่าย " +
+    "คุณสามารถแปลงข้อมูลวิชาการที่ซับซ้อนเป็นภาษาที่คนทั่วไปเข้าใจได้ " +
+    "คุณจัดรูปแบบด้วย Markdown อย่างมีระบบ ใช้ตารางแสดงข้อมูลเชิงตัวเลข " +
+    "และเน้นย้ำเสมอว่าอาการรุนแรงหรือการวินิจฉัยโรคต้องพบแพทย์",
   tools: [],
   visual: {
     color:  "text-emerald-700",
