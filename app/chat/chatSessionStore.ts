@@ -1,4 +1,4 @@
-import type { ChatSessionMessage, ChatSessionState, ChatMessageRole } from "./chatTypes";
+import type { ChatSessionMessage, ChatSessionState, ChatMessageRole, AgentStep } from "./chatTypes";
 
 const CHAT_SESSION_PREFIX = "chat-session:";
 export const CHAT_SESSION_UPDATED_EVENT = "chat-session-updated";
@@ -49,12 +49,17 @@ function normalizeChatSessionState(
   };
 }
 
-export function createChatSessionMessage(role: ChatMessageRole, text: string): ChatSessionMessage {
+export function createChatSessionMessage(
+  role: ChatMessageRole,
+  text: string,
+  agentSteps?: AgentStep[],
+): ChatSessionMessage {
   return {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     text,
     timestamp: formatTimestamp(),
+    ...(agentSteps && agentSteps.length > 0 ? { agentSteps } : {}),
   };
 }
 
@@ -146,13 +151,13 @@ export function updateChatSessionState(
 
 export function appendChatSessionMessages(
   sessionId: string,
-  entries: Array<{ role: ChatSessionMessage["role"]; text: string }>,
+  entries: Array<{ role: ChatSessionMessage["role"]; text: string; agentSteps?: AgentStep[] }>,
 ) {
   return updateChatSessionState(sessionId, (current) => ({
     ...current,
     messages: [
       ...current.messages,
-      ...entries.map((entry) => createChatSessionMessage(entry.role, entry.text)),
+      ...entries.map((entry) => createChatSessionMessage(entry.role, entry.text, entry.agentSteps)),
     ],
   })).messages;
 }

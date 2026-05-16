@@ -101,7 +101,7 @@ function parseCsv(text: string) {
 	return rows
 }
 
-function truncateTable(rows: string[][], maxRows = 40, maxCols = 12) {
+function truncateTable(rows: string[][], maxRows = 2000, maxCols = 200) {
 	return {
 		rows: rows.slice(0, maxRows).map((row) => row.slice(0, maxCols).map((cell) => `${cell}`)),
 		truncated: rows.length > maxRows || rows.some((row) => row.length > maxCols),

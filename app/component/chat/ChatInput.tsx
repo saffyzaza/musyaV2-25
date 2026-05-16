@@ -6,13 +6,18 @@ import { HiOutlineLightBulb, HiOutlineSparkles } from "react-icons/hi";
 import { FiPlus, FiList, FiPaperclip, FiImage, FiCamera, FiFileText, FiEdit, FiDatabase } from "react-icons/fi";
 import { TbGitCompare } from "react-icons/tb";
 
-import type { ChatRouteResponse } from "../../chat/chatTypes";
+import type { AgentStep } from "../../chat/chatTypes";
 import {
     createChatSessionMessage,
     generateChatSessionId,
     getChatSessionState,
     saveChatSessionState,
 } from "../../chat/chatSessionStore";
+import {
+    setStreamingSteps,
+    clearStreamingState,
+    getStreamingSteps,
+} from "../../chat/streamingStore";
 
 type ChatInputProps = {
     onToggleDatabaseExplorer?: () => void;
@@ -75,32 +80,82 @@ export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
         try {
             const response = await fetch("/api/chat", {
                 method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    sessionId,
-                    prompt: trimmedMessage,
-                    history: nextMessages,
-                }),
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ sessionId, prompt: trimmedMessage, history: nextMessages }),
             });
 
-            const payload = (await response.json()) as ChatRouteResponse | { error?: string };
-
-            if (!response.ok || !("message" in payload)) {
-                const errorMessage = "error" in payload ? payload.error : undefined;
-                throw new Error(errorMessage || "ไม่สามารถติดต่อ AI ได้");
+            if (!response.ok || !response.body) {
+                let errorMsg = "ไม่สามารถติดต่อ AI ได้";
+                try {
+                    const errPayload = (await response.json()) as { error?: string };
+                    if (errPayload.error) errorMsg = errPayload.error;
+                } catch { /* ignore */ }
+                throw new Error(errorMsg);
             }
 
-            saveChatSessionState(sessionId, {
-                ...getChatSessionState(sessionId),
-                sessionId,
-                status: "completed",
-                error: undefined,
-                messages: [...getChatSessionState(sessionId).messages, createChatSessionMessage("ai", payload.message)],
-                lastUserPrompt: trimmedMessage,
-            });
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split("\n\n");
+                buffer = parts.pop() ?? "";
+
+                for (const part of parts) {
+                    const line = part.trim();
+                    if (!line.startsWith("data: ")) continue;
+
+                    let event: { type: string; [key: string]: unknown };
+                    try {
+                        event = JSON.parse(line.slice(6)) as { type: string; [key: string]: unknown };
+                    } catch {
+                        continue;
+                    }
+
+                    if (event.type === "agent_start") {
+                        const current = getStreamingSteps(sessionId) ?? [];
+                        const newStep: AgentStep = {
+                            agentName: event.agentName as string,
+                            agentRole: event.agentRole as string,
+                            thinking: "",
+                            result: "",
+                            status: "running",
+                        };
+                        setStreamingSteps(sessionId, [...current, newStep]);
+                    } else if (event.type === "agent_done") {
+                        const current = getStreamingSteps(sessionId) ?? [];
+                        const step = event.step as AgentStep;
+                        setStreamingSteps(sessionId, current.map((s) =>
+                            s.agentName === step.agentName ? { ...step, status: "done" as const } : s,
+                        ));
+                    } else if (event.type === "final") {
+                        clearStreamingState(sessionId);
+                        const agentSteps = (event.agentSteps as AgentStep[]).map((s) => ({
+                            ...s,
+                            status: "done" as const,
+                        }));
+                        saveChatSessionState(sessionId, {
+                            ...getChatSessionState(sessionId),
+                            sessionId,
+                            status: "completed",
+                            error: undefined,
+                            messages: [
+                                ...getChatSessionState(sessionId).messages,
+                                createChatSessionMessage("ai", event.message as string, agentSteps),
+                            ],
+                            lastUserPrompt: trimmedMessage,
+                        });
+                    } else if (event.type === "error") {
+                        throw new Error((event.message as string) || "ระบบ AI ตอบกลับไม่สำเร็จ");
+                    }
+                }
+            }
         } catch (error) {
+            clearStreamingState(sessionId);
             const errorMessage = error instanceof Error ? error.message : "ไม่สามารถติดต่อ AI ได้";
 
             saveChatSessionState(sessionId, {

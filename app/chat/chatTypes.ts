@@ -1,10 +1,29 @@
 export type ChatMessageRole = "user" | "ai";
 
+export type AgentTool = {
+  name: string;
+  displayName: string;
+  input: string;
+  output: string;
+};
+
+export type AgentStepStatus = "pending" | "running" | "done";
+
+export type AgentStep = {
+  agentName: string;
+  agentRole: string;
+  thinking: string;
+  tool?: AgentTool | null;
+  result: string;
+  status?: AgentStepStatus;
+};
+
 export type ChatSessionMessage = {
   id: string;
   role: ChatMessageRole;
   text: string;
   timestamp: string;
+  agentSteps?: AgentStep[];
 };
 
 export type ChatSessionState = {
@@ -23,4 +42,5 @@ export type ChatRouteRequest = {
 
 export type ChatRouteResponse = {
   message: string;
+  agentSteps?: AgentStep[];
 };
