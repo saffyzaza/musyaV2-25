@@ -1,5 +1,7 @@
 import type { ExecutableTool, ToolArgs, ToolResult } from "./types";
 
+type FileMeta = { id: string; name: string; path: string };
+
 const splitLine = (line: string) =>
   line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
 
@@ -15,7 +17,16 @@ const csvReader: ExecutableTool = {
 
     if (!file_id) return { success: false, data: "ต้องระบุ file_id (ได้จาก file_finder)" };
 
-    // ① Fetch CSV content
+    // ① Fetch file metadata to show the real source
+    let fileMeta: FileMeta | null = null;
+    try {
+      const metaRes = await fetch(`${appUrl}/api/files/${file_id}?meta=1`);
+      if (metaRes.ok) {
+        fileMeta = (await metaRes.json()) as FileMeta;
+      }
+    } catch { /* skip, metadata is best-effort */ }
+
+    // ② Fetch CSV content
     let text = "";
     try {
       const res = await fetch(`${appUrl}/api/files/${file_id}`);
@@ -28,45 +39,43 @@ const csvReader: ExecutableTool = {
     const allLines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
     if (allLines.length === 0) return { success: false, data: "ไฟล์ว่างเปล่า" };
 
-    // ② Scan columns (header row)
+    // ③ Scan columns
     const headers = splitLine(allLines[0]);
     const dataLines = allLines.slice(1);
     const totalRows = dataLines.length;
 
-    // ③ Filter rows
+    // ④ Filter rows
     let filtered = dataLines;
-
-    if (filter_year) {
-      filtered = filtered.filter((row) => row.includes(filter_year));
-    }
+    if (filter_year) filtered = filtered.filter((row) => row.includes(filter_year));
     if (filter_keyword) {
       const kw = filter_keyword.toLowerCase();
       filtered = filtered.filter((row) => row.toLowerCase().includes(kw));
     }
 
-    // ④ Return up to 50 rows with context
     const preview = filtered.slice(0, 50);
 
+    // ⑤ Source header — shown to LLM and user so data can be verified
+    const sourceLine = fileMeta
+      ? `📄 SOURCE FILE: "${fileMeta.name}" | path: ${fileMeta.path} | ID: ${file_id}`
+      : `📄 SOURCE FILE ID: ${file_id}`;
+
+    const filterNote =
+      filtered.length === 0
+        ? `⚠️ ไม่พบข้อมูลที่ตรงกับ filter_year="${filter_year}" filter_keyword="${filter_keyword}"\nข้อมูลในไฟล์นี้ (3 แถวแรก):\n${dataLines.slice(0, 3).join("\n")}`
+        : `📊 ทั้งหมด ${totalRows} แถว → กรองแล้ว ${filtered.length} แถว (แสดง ${preview.length}):`;
+
     const lines = [
-      `✅ อ่านไฟล์สำเร็จ`,
+      sourceLine,
       `📋 คอลัมน์ (${headers.length} คอลัมน์): ${headers.join(" | ")}`,
-      `📊 ทั้งหมด ${totalRows} แถว → กรองแล้ว ${filtered.length} แถว (แสดง ${preview.length}):`,
-      "",
-      headers.join(","),
-      ...preview,
+      filterNote,
     ];
 
-    if (filtered.length === 0) {
-      return {
-        success: false,
-        data:
-          `อ่านไฟล์สำเร็จ แต่ไม่พบข้อมูลที่ตรงกับ filter_year="${filter_year}" filter_keyword="${filter_keyword}"\n` +
-          `คอลัมน์ที่มี: ${headers.join(" | ")}\n` +
-          `ตัวอย่าง 3 แถวแรก:\n${dataLines.slice(0, 3).join("\n")}`,
-      };
+    if (filtered.length > 0) {
+      lines.push("", headers.join(","), ...preview);
+      lines.push("", `⚠️ ข้อมูลข้างต้นมาจากไฟล์ "${fileMeta?.name ?? file_id}" เท่านั้น ใช้ตัวเลขจากนี้เท่านั้น ห้ามคาดเดาหรือแต่งเพิ่ม`);
     }
 
-    return { success: true, data: lines.join("\n") };
+    return { success: filtered.length > 0, data: lines.join("\n") };
   },
 };
 
