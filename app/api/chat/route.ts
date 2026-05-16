@@ -20,7 +20,7 @@ const MODELS: ModelConfig = {
 
 // ─── LLM caller ───────────────────────────────────────────────────────────────
 
-async function callLLM(systemPrompt: string, userPrompt: string, model: string): Promise<string> {
+async function callLLM(systemPrompt: string, userPrompt: string, model: string, temperature = 0.1): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY!;
 
   const res = await fetch(OPENROUTER_URL, {
@@ -33,7 +33,7 @@ async function callLLM(systemPrompt: string, userPrompt: string, model: string):
     },
     body: JSON.stringify({
       model,
-      temperature: 0.4,
+      temperature,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },

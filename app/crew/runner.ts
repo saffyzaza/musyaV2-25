@@ -18,8 +18,8 @@ export type ModelConfig = {
 };
 
 type LLMMessage = { role: "system" | "user" | "assistant"; content: string };
-type LLMCaller = (systemPrompt: string, userPrompt: string, model: string) => Promise<string>;
-type LLMMultiTurn = (messages: LLMMessage[], model: string) => Promise<string>;
+type LLMCaller = (systemPrompt: string, userPrompt: string, model: string, temperature?: number) => Promise<string>;
+type LLMMultiTurn = (messages: LLMMessage[], model: string, temperature?: number) => Promise<string>;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -173,10 +173,10 @@ async function executeWithTools(
   let isFirstCall = true;
 
   for (let i = 0; i < maxIterations; i++) {
-    // First reasoning: use full agent model. ReAct continuations: use cheap tool model.
     const model = isFirstCall ? agentModel : models.tool;
+    const temp = getTempForAgent(agent.name);
     isFirstCall = false;
-    lastOutput = await callMultiTurn(messages, model);
+    lastOutput = await callMultiTurn(messages, model, temp);
 
     const toolCall = parseToolCall(lastOutput);
     if (!toolCall) break; // No tool call → agent is done
@@ -220,14 +220,20 @@ export async function* runCrew(
   let dynamicTasks: Task[] = [...crew.tasks];
   let planSent = false;
 
-  // Wrap callLLM for multi-turn (ReAct loop) — model is chosen per call
-  const callMultiTurn: LLMMultiTurn = async (messages, model) => {
+  // Temperature per agent type: data agents use 0.1, synthesizer 0.2
+  function getTempForAgent(agentName: string): number {
+    if (agentName === "Synthesizer") return 0.2;
+    return 0.1; // Orchestrator, domain agents, tool ReAct
+  }
+
+  // Wrap callLLM for multi-turn (ReAct loop) — model + temperature per call
+  const callMultiTurn: LLMMultiTurn = async (messages, model, temperature) => {
     const sys = messages.find((m) => m.role === "system")?.content ?? "";
     const userMsgs = messages.filter((m) => m.role !== "system");
     const combined = userMsgs
       .map((m) => `[${m.role.toUpperCase()}]: ${m.content}`)
       .join("\n\n---\n\n");
-    return callLLM(sys, combined, model);
+    return callLLM(sys, combined, model, temperature);
   };
 
   for (let taskIndex = 0; taskIndex < dynamicTasks.length; taskIndex++) {
