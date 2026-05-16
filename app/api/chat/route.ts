@@ -35,40 +35,72 @@ type CsvFileData = {
   totalRows: number;
 };
 
-function parseFirstRows(csvText: string, maxRows = 30): { headers: string[]; sampleRows: string[][] } {
+const splitCsvLine = (line: string): string[] =>
+  line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+
+// Extract short keywords (≥2 chars, no stopwords) from a Thai+English query
+function extractKeywords(query: string): string[] {
+  const stopwords = new Set(["ขอ", "ข้อมูล", "การ", "ให้", "และ", "ใน", "ปี", "จาก", "ที่", "ของ", "มี", "a", "the", "of", "in", "for", "and", "data"]);
+  return query
+    .replace(/[()[\]{}'"""'']/g, " ")
+    .split(/[\s,]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2 && !stopwords.has(w));
+}
+
+// Smart read: headers + first 10 rows + ALL rows matching any query keyword
+function parseSmartRows(
+  csvText: string,
+  keywords: string[],
+  maxMatchedRows = 150,
+): { headers: string[]; sampleRows: string[][]; matchedCount: number } {
   const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  if (lines.length === 0) return { headers: [], sampleRows: [] };
+  if (lines.length === 0) return { headers: [], sampleRows: [], matchedCount: 0 };
 
-  // Simple CSV split — handles quoted commas imperfectly but good enough for context
-  const splitLine = (line: string) =>
-    line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+  const headers = splitCsvLine(lines[0]);
+  const dataLines = lines.slice(1);
 
-  const headers = splitLine(lines[0]);
-  const sampleRows = lines.slice(1, maxRows + 1).map(splitLine);
-  return { headers, sampleRows };
+  const kwLower = keywords.map((k) => k.toLowerCase());
+
+  const first10 = dataLines.slice(0, 10);
+  const matched = dataLines.filter((line) => {
+    const lower = line.toLowerCase();
+    return kwLower.some((kw) => lower.includes(kw));
+  });
+
+  // Deduplicate: matched rows that are already in first10 don't need repeating
+  const first10Set = new Set(first10);
+  const uniqueMatched = matched.filter((l) => !first10Set.has(l)).slice(0, maxMatchedRows);
+
+  const combined = [...first10, ...uniqueMatched];
+  return {
+    headers,
+    sampleRows: combined.map(splitCsvLine),
+    matchedCount: matched.length,
+  };
 }
 
 function formatCsvContext(files: CsvFileData[]): string {
   if (files.length === 0) return "";
   let ctx = "\n\n## ข้อมูล CSV ที่พบในระบบ (ใช้ข้อมูลนี้ในการวิเคราะห์):\n";
   for (const f of files) {
-    ctx += `\n### ไฟล์: ${f.name}  (ทั้งหมด ${f.totalRows} แถว)\n`;
+    ctx += `\n### ไฟล์: ${f.name}  (ทั้งหมด ${f.totalRows} แถวข้อมูล, แสดง ${f.sampleRows.length} แถวที่เกี่ยวข้อง)\n`;
     ctx += `คอลัมน์: ${f.headers.join(" | ")}\n`;
-    ctx += `ตัวอย่างข้อมูล:\n`;
+    ctx += `ข้อมูล:\n`;
     ctx += f.headers.join(",") + "\n";
-    for (const row of f.sampleRows.slice(0, 15)) {
+    for (const row of f.sampleRows) {
       ctx += row.join(",") + "\n";
     }
   }
   return ctx;
 }
 
-async function findCsvFiles(): Promise<{
-  files: CsvFileData[];
-  csvFinderStep: AgentStep;
-}> {
+async function findCsvFiles(
+  query: string,
+): Promise<{ files: CsvFileData[]; csvFinderStep: AgentStep }> {
   let files: CsvFileData[] = [];
   let findError = "";
+  const keywords = extractKeywords(query);
 
   try {
     const listRes = await fetch(`${APP_URL}/api/files`);
@@ -84,8 +116,9 @@ async function findCsvFiles(): Promise<{
           if (!contentRes.ok) continue;
           const text = await contentRes.text();
           const totalRows = text.split(/\r?\n/).filter((l) => l.trim()).length - 1;
-          const { headers, sampleRows } = parseFirstRows(text, 30);
-          files.push({ id: file.id, name: file.name, headers, sampleRows, totalRows });
+          const { headers, sampleRows, matchedCount } = parseSmartRows(text, keywords);
+          files.push({ id: file.id, name: file.name, headers, sampleRows: sampleRows.slice(0, 160), totalRows });
+          console.log(`[CSV Finder] ${file.name}: ${totalRows} rows total, ${matchedCount} matched keywords [${keywords.join(", ")}], sending ${Math.min(sampleRows.length, 160)} rows`);
         } catch {
           /* skip unreadable file */
         }
@@ -102,20 +135,22 @@ async function findCsvFiles(): Promise<{
     agentRole: "ค้นหาและโหลดไฟล์ข้อมูล",
     thinking:
       files.length > 0
-        ? `ค้นหาไฟล์ CSV ในระบบ MinIO พบ ${files.length} ไฟล์ กำลังโหลดข้อมูลเพื่อส่งให้ Orchestrator`
+        ? `ค้นหาไฟล์ CSV ในระบบ MinIO พบ ${files.length} ไฟล์ กรองแถวที่ตรงกับคำค้น [${keywords.join(", ")}] แล้วส่งให้ Orchestrator`
         : findError || "ค้นหาไฟล์ CSV ในระบบ MinIO แต่ไม่พบไฟล์ที่เกี่ยวข้อง",
     tool: {
       name: "list_files",
-      displayName: "ค้นหาไฟล์ CSV ใน MinIO",
-      input: "ค้นหาไฟล์ประเภท CSV ทั้งหมดในระบบจัดเก็บ",
+      displayName: "ค้นหาและกรองข้อมูล CSV ใน MinIO",
+      input: `ค้นหาไฟล์ CSV · กรองด้วยคำค้น: ${keywords.join(", ")}`,
       output:
         files.length > 0
-          ? files.map((f) => `${f.name} (${f.headers.length} คอลัมน์, ${f.totalRows} แถว)`).join(" | ")
+          ? files
+              .map((f) => `${f.name} (${f.headers.length} คอลัมน์, ${f.totalRows} แถวทั้งหมด, ส่ง ${f.sampleRows.length} แถวที่เกี่ยวข้อง)`)
+              .join(" | ")
           : "ไม่พบไฟล์ CSV",
     },
     result:
       files.length > 0
-        ? `โหลดข้อมูลจาก ${files.length} ไฟล์เรียบร้อย — ส่งให้ Orchestrator วิเคราะห์`
+        ? `โหลดและกรองข้อมูลจาก ${files.length} ไฟล์เรียบร้อย — ส่งให้ Orchestrator วิเคราะห์`
         : "ไม่พบไฟล์ CSV ใช้ความรู้ทั่วไปแทน",
     status: "done",
   };
@@ -282,8 +317,8 @@ export async function POST(request: Request) {
         // 1. CSV Finder starts immediately
         send({ type: "agent_start", agentName: "CSV Finder", agentRole: "ค้นหาและโหลดไฟล์ข้อมูล" });
 
-        // 2. Actually search MinIO for CSV files
-        const { files: csvFiles, csvFinderStep } = await findCsvFiles();
+        // 2. Actually search MinIO for CSV files (smart-filtered by the user's query)
+        const { files: csvFiles, csvFinderStep } = await findCsvFiles(prompt);
         send({ type: "agent_done", step: csvFinderStep });
         await sleep(300);
 
