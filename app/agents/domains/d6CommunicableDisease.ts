@@ -12,6 +12,7 @@ const d6CommunicableDisease: Agent = {
   tools: [
     { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
     { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
+    { name: "multi_csv_reader", description: "อ่านหลายไฟล์ CSV พร้อมกัน สำหรับข้อมูลหลายปี (2565-2569)" },
     { name: "disease_surveillance", description: "ระบบเฝ้าระวังโรคติดต่อ รายงาน 506" },
     { name: "statistics_tool",      description: "สถิติอัตราป่วย อัตราตาย รายโรค รายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและรูปแบบการระบาด" },

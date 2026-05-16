@@ -12,6 +12,7 @@ const d2MentalHealth: Agent = {
   tools: [
     { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
     { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
+    { name: "multi_csv_reader", description: "อ่านหลายไฟล์ CSV พร้อมกัน สำหรับข้อมูลหลายปี (2565-2569)" },
     { name: "statistics_tool",      description: "วิเคราะห์สถิติสุขภาพจิตและการฆ่าตัวตายรายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและปัจจัยเสี่ยงสุขภาพจิต" },
     { name: "disease_surveillance", description: "ข้อมูลระบบเฝ้าระวังการฆ่าตัวตายและสุขภาพจิต" },
