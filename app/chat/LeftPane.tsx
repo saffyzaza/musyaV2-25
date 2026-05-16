@@ -3,7 +3,7 @@ import { useSyncExternalStore, useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import clsx from "clsx";
 import { HiOutlineSparkles, HiOutlineLightBulb } from "react-icons/hi";
-import { FiSearch, FiCpu, FiTool, FiChevronDown, FiChevronRight, FiDatabase } from "react-icons/fi";
+import { FiSearch, FiCpu, FiTool, FiChevronDown, FiChevronRight } from "react-icons/fi";
 
 import type { ChatSessionState, AgentStep } from "./chatTypes";
 import { createEmptyChatSessionState, getChatSessionState, subscribeToChatSession } from "./chatSessionStore";
@@ -14,7 +14,6 @@ const PREVIEW_SESSION: ChatSessionState = createEmptyChatSessionState("preview-s
 
 // Pipeline agent definitions — fixed order, always shown
 const PIPELINE_AGENTS = [
-  { name: "CSV Finder", role: "ค้นหาและโหลดไฟล์ข้อมูล" },
   { name: "Orchestrator", role: "วิเคราะห์และประสานงาน" },
   { name: "Research Agent", role: "ค้นหาและวิเคราะห์ข้อมูล" },
   { name: "Synthesizer", role: "สรุปและจัดรูปแบบคำตอบ" },
@@ -23,7 +22,6 @@ const PIPELINE_AGENTS = [
 type AgentCfg = { color: string; bg: string; border: string; dot: string; letter: string };
 
 const AGENT_CONFIG: Record<string, AgentCfg> = {
-  "CSV Finder": { color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200", dot: "bg-orange-500", letter: "F" },
   Orchestrator: { color: "text-violet-700", bg: "bg-violet-50", border: "border-violet-200", dot: "bg-violet-500", letter: "O" },
   "Research Agent": { color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-500", letter: "R" },
   Synthesizer: { color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", letter: "S" },
@@ -38,13 +36,9 @@ const TOOL_ICONS: Record<string, string> = {
   statistics_tool: "📈",
   nutrition_database: "🥗",
   disease_surveillance: "🦠",
-  list_files: "📁",
-  read_csv: "📋",
-  analyze_and_fetch: "🧠",
 };
 
 function AgentIcon({ name }: { name: string }) {
-  if (name === "CSV Finder") return <FiDatabase size={9} />;
   if (name === "Orchestrator") return <HiOutlineLightBulb size={10} />;
   if (name === "Research Agent") return <FiSearch size={9} />;
   if (name === "Synthesizer") return <HiOutlineSparkles size={10} />;
@@ -53,33 +47,20 @@ function AgentIcon({ name }: { name: string }) {
 
 function ToolCard({ step, cfg }: { step: AgentStep; cfg: AgentCfg }) {
   if (!step.tool) return null;
-  const hasCodeBlock = (s: string) => s.includes("```");
   return (
     <div className={clsx("rounded-lg p-2 border", cfg.bg, cfg.border)}>
       <div className={clsx("text-[10px] font-semibold mb-1.5 flex items-center gap-1.5", cfg.color)}>
         <FiTool size={9} />
         <span>{TOOL_ICONS[step.tool.name] ?? "🔧"} {step.tool.displayName}</span>
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-1">
         <div>
           <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Input</span>
-          <div className="mt-0.5 bg-white/80 rounded overflow-hidden">
-            {hasCodeBlock(step.tool.input) ? (
-              <MarkdownContent text={step.tool.input} />
-            ) : (
-              <p className="text-[11px] text-gray-600 px-1.5 py-0.5 leading-relaxed">{step.tool.input}</p>
-            )}
-          </div>
+          <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">{step.tool.input}</p>
         </div>
         <div>
           <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Output</span>
-          <div className="mt-0.5 bg-white/80 rounded overflow-hidden">
-            {hasCodeBlock(step.tool.output) ? (
-              <MarkdownContent text={step.tool.output} />
-            ) : (
-              <p className="text-[11px] text-gray-600 px-1.5 py-0.5 leading-relaxed">{step.tool.output}</p>
-            )}
-          </div>
+          <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">{step.tool.output}</p>
         </div>
       </div>
     </div>
