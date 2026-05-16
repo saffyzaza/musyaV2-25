@@ -2,16 +2,25 @@ import type { ExecutableTool, ToolArgs, ToolResult } from "./types";
 
 type StoredFile = { id: string; name: string; path: string; extension: string; previewKind: string };
 
-// Normalize for Thai string comparison (lowercase, trim)
 const norm = (s: string) => s.toLowerCase().trim();
 
-// Check if a search term appears in any part of the full file path
+// Expand year range "2565-2567" → ["2565","2566","2567"]
+// or single year "2565" → ["2565"]
+function expandYears(year: string): string[] {
+  const range = year.match(/^(\d{4})-(\d{4})$/);
+  if (range) {
+    const from = parseInt(range[1]);
+    const to   = parseInt(range[2]);
+    return Array.from({ length: to - from + 1 }, (_, i) => String(from + i));
+  }
+  return year ? [year] : [];
+}
+
 function pathMatches(fullPath: string, term: string): boolean {
   const p = norm(fullPath);
   const t = norm(term);
   if (p.includes(t)) return true;
 
-  // Partial Thai province name match: "อุบล" → "อุบลราชธานี"
   const PROVINCE_EXPAND: Record<string, string[]> = {
     อุบล:        ["อุบลราชธานี"],
     "ขอนแก่น":   ["ขอนแก่น"],
@@ -20,18 +29,16 @@ function pathMatches(fullPath: string, term: string): boolean {
     nakhon:      ["นครราชสีมา", "nakhon"],
   };
   for (const [short, expansions] of Object.entries(PROVINCE_EXPAND)) {
-    if (t === norm(short)) {
-      return expansions.some((e) => p.includes(norm(e)));
-    }
+    if (t === norm(short)) return expansions.some((e) => p.includes(norm(e)));
   }
   return false;
 }
 
 const fileFinder: ExecutableTool = {
   name: "file_finder",
-  description: "ค้นหาไฟล์ CSV ใน MinIO โดยระบุ domain, province, disease, year",
+  description: "ค้นหาไฟล์ CSV ใน MinIO โดยระบุ domain, province, disease และ year (รองรับ range เช่น 2565-2567)",
   usage:
-    '[TOOL_CALL: file_finder(domain="D3_NCDs", province="อุบลราชธานี", disease="โรคไต", year="2565")]',
+    '[TOOL_CALL: file_finder(domain="D3_NCDs", province="อุบลราชธานี", disease="โรคเบาหวาน", year="2565-2567")]',
 
   async execute(args: ToolArgs, appUrl: string): Promise<ToolResult> {
     const { domain, province, disease, year } = args;
@@ -45,21 +52,40 @@ const fileFinder: ExecutableTool = {
       return { success: false, data: "เกิดข้อผิดพลาดในการเชื่อมต่อ API" };
     }
 
-    // Only CSV files
     const csvFiles = files.filter(
       (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
     );
 
-    const searchTerms = [domain, province, disease, year].filter(Boolean);
+    // Expand year range → individual terms
+    const yearTerms = expandYears(year ?? "");
+    // Non-year search terms (must ALL match)
+    const baseTerms = [domain, province, disease].filter(Boolean);
+    // All search terms for display
+    const allTerms = [...baseTerms, ...yearTerms];
 
-    // Score each file: count how many terms match the full path
     const scored = csvFiles.map((f) => {
       const fullPath = `${f.path ?? ""}/${f.name}`;
-      const score = searchTerms.filter((t) => pathMatches(fullPath, t)).length;
-      return { f, fullPath, score };
+
+      // All base terms must match (domain + province + disease)
+      const baseMatch = baseTerms.every((t) => pathMatches(fullPath, t));
+      if (!baseMatch) return { f, fullPath, score: 0, yearMatch: false };
+
+      // Year: any year in the expanded range matches → include
+      const yearMatch = yearTerms.length === 0 || yearTerms.some((y) => pathMatches(fullPath, y));
+      const score = baseTerms.filter((t) => pathMatches(fullPath, t)).length +
+                    (yearMatch ? 1 : 0);
+
+      return { f, fullPath, score, yearMatch };
     });
 
-    const best = scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score);
+    // Include files that match all base terms (even if year not in filename)
+    const best = scored
+      .filter((s) => s.score > 0)
+      .sort((a, b) => {
+        // Prioritize year-matched files, then by score
+        if (a.yearMatch !== b.yearMatch) return a.yearMatch ? -1 : 1;
+        return b.score - a.score;
+      });
 
     if (best.length === 0) {
       const allCsvPaths = csvFiles.slice(0, 20).map((f) => `${f.path}/${f.name}`).join("\n");
@@ -72,12 +98,16 @@ const fileFinder: ExecutableTool = {
     }
 
     const lines = best.map(
-      (s) => `- ID: ${s.f.id} | ชื่อ: ${s.f.name} | path: ${s.f.path} | score: ${s.score}/${searchTerms.length}`,
+      (s) =>
+        `- ID: ${s.f.id} | ชื่อ: ${s.f.name} | path: ${s.f.path}${s.yearMatch ? " ✓ปีตรง" : " (ปีไม่ระบุในชื่อไฟล์)"}`,
     );
 
     return {
       success: true,
-      data: `พบ ${best.length} ไฟล์ที่ตรงกัน:\n${lines.join("\n")}`,
+      data:
+        `พบ ${best.length} ไฟล์ (year="${year}" → ค้นหาปี: ${yearTerms.join(",")||"ทั้งหมด"}):\n` +
+        lines.join("\n") +
+        `\n\n→ ส่ง IDs ทั้งหมดให้ multi_csv_reader: ${best.map((s) => s.f.id).join(",")}`,
     };
   },
 };
