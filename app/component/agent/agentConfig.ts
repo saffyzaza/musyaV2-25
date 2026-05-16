@@ -26,11 +26,3 @@ export const DEFAULT_CFG: AgentCfg = {
   letter: "?",
 };
 
-export const TOOL_ICONS: Record<string, string> = {
-  knowledge_search:  "🔍",
-  data_analysis:     "📊",
-  clinical_guidelines: "📋",
-  statistics_tool:   "📈",
-  nutrition_database: "🥗",
-  disease_surveillance: "🦠",
-};

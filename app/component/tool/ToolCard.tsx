@@ -2,8 +2,8 @@
 import clsx from "clsx";
 import { FiTool } from "react-icons/fi";
 import type { AgentStep } from "@/app/chat/chatTypes";
-import type { AgentCfg } from "./agentConfig";
-import { TOOL_ICONS } from "./agentConfig";
+import type { AgentCfg } from "@/app/component/agent/agentConfig";
+import { TOOL_ICONS } from "./toolConfig";
 
 type Props = { step: AgentStep; cfg: AgentCfg };
 

@@ -5,7 +5,7 @@ import { FiChevronDown, FiChevronRight } from "react-icons/fi";
 import type { AgentStep } from "@/app/chat/chatTypes";
 import { AGENT_CONFIG, DEFAULT_CFG } from "./agentConfig";
 import { AgentIcon } from "./AgentIcon";
-import { ToolCard } from "./ToolCard";
+import { ToolCard } from "../tool/ToolCard";
 
 type Props = {
   agentName: string;
