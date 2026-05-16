@@ -293,19 +293,32 @@ function formatCsvContext(files: CsvFileData[]): string {
 
 function buildSystemPrompt(csvContext: string): string {
   const hasCsv = csvContext.length > 0;
+
+  const researcherToolInput = hasCsv
+    ? `Python pandas code ที่ใช้ดึงข้อมูลตามคำถาม เช่น:
+\`\`\`python
+import pandas as pd
+
+df = pd.read_csv('ชื่อไฟล์.csv')
+result = df[(df['province'] == 'ค่าจังหวัด') & (df['year'].between(2022, 2025))]
+print(result.groupby(['year'])[['คอลัมน์ที่สนใจ']].sum().to_string())
+\`\`\`
+(เขียน code จริงตามคอลัมน์และข้อมูลที่ได้รับ)`
+    : "คำค้นหาหรือหัวข้อที่ต้องการความรู้";
+
   return `คุณคือระบบ Multi-Agent AI ช่วยงานด้านสุขภาพและข้อมูลสาธารณสุข${csvContext}
 
 ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความนอก JSON:
 {
-  "orchestrator_thinking": "วิเคราะห์คำถาม${hasCsv ? "และข้อมูล CSV ที่ CSV Finder เลือกมาให้" : ""}",
+  "orchestrator_thinking": "วิเคราะห์คำถาม${hasCsv ? "และข้อมูล CSV ที่ CSV Finder เลือกมาให้ ระบุชื่อคอลัมน์จริงที่เห็น" : ""}",
   "orchestrator_delegation": "มอบหมายให้ Research Agent วิเคราะห์",
-  "researcher_thinking": "${hasCsv ? "วิเคราะห์ข้อมูลจากไฟล์ CSV ที่ได้รับ" : "ค้นหาข้อมูลที่เกี่ยวข้อง"}",
+  "researcher_thinking": "${hasCsv ? "วิเคราะห์โครงสร้าง CSV และเขียน pandas code เพื่อดึงข้อมูลตามที่ต้องการ" : "ค้นหาข้อมูลที่เกี่ยวข้อง"}",
   "researcher_tool": "${hasCsv ? "data_analysis" : "knowledge_search"}",
-  "researcher_tool_input": "รายละเอียดการวิเคราะห์",
-  "researcher_findings": "ผลการวิเคราะห์ข้อมูล",
-  "synthesizer_thinking": "รวบรวมและสรุป",
+  "researcher_tool_input": "${researcherToolInput.replace(/\n/g, "\\n").replace(/"/g, '\\"')}",
+  "researcher_findings": "${hasCsv ? "สรุปผลที่ได้จาก code เช่น 'พบข้อมูล X แถว ปี 2022: N ราย ปี 2023: M ราย...'" : "สรุปข้อมูลที่ค้นพบ"}",
+  "synthesizer_thinking": "รวบรวมและสรุปเป็นคำตอบ",
   "synthesizer_summary": "สรุป 1 ประโยค",
-  "finalAnswer": "คำตอบฉบับสมบูรณ์ใน Markdown${hasCsv ? " อ้างอิงข้อมูลจริงจาก CSV ถ้ามีตัวเลขให้แสดงเป็นตาราง" : " ถ้ามีตัวเลขให้แสดงเป็นตาราง"}"
+  "finalAnswer": "คำตอบฉบับสมบูรณ์ใน Markdown${hasCsv ? " อ้างอิงตัวเลขจริงจากข้อมูล CSV ถ้ามีตัวเลขหลายปีให้แสดงเป็นตาราง markdown" : " ถ้ามีตัวเลขให้แสดงเป็นตาราง"}"
 }
 
 researcher_tool ต้องเป็นหนึ่งใน: knowledge_search, data_analysis, clinical_guidelines, statistics_tool, nutrition_database, disease_surveillance

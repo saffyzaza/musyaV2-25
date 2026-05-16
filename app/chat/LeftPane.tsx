@@ -53,20 +53,33 @@ function AgentIcon({ name }: { name: string }) {
 
 function ToolCard({ step, cfg }: { step: AgentStep; cfg: AgentCfg }) {
   if (!step.tool) return null;
+  const hasCodeBlock = (s: string) => s.includes("```");
   return (
     <div className={clsx("rounded-lg p-2 border", cfg.bg, cfg.border)}>
       <div className={clsx("text-[10px] font-semibold mb-1.5 flex items-center gap-1.5", cfg.color)}>
         <FiTool size={9} />
         <span>{TOOL_ICONS[step.tool.name] ?? "🔧"} {step.tool.displayName}</span>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1.5">
         <div>
           <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Input</span>
-          <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">{step.tool.input}</p>
+          <div className="mt-0.5 bg-white/80 rounded overflow-hidden">
+            {hasCodeBlock(step.tool.input) ? (
+              <MarkdownContent text={step.tool.input} />
+            ) : (
+              <p className="text-[11px] text-gray-600 px-1.5 py-0.5 leading-relaxed">{step.tool.input}</p>
+            )}
+          </div>
         </div>
         <div>
           <span className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">Output</span>
-          <p className="text-[11px] text-gray-600 bg-white/80 rounded px-1.5 py-0.5 mt-0.5 leading-relaxed">{step.tool.output}</p>
+          <div className="mt-0.5 bg-white/80 rounded overflow-hidden">
+            {hasCodeBlock(step.tool.output) ? (
+              <MarkdownContent text={step.tool.output} />
+            ) : (
+              <p className="text-[11px] text-gray-600 px-1.5 py-0.5 leading-relaxed">{step.tool.output}</p>
+            )}
+          </div>
         </div>
       </div>
     </div>
