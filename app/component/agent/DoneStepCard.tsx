@@ -3,7 +3,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { FiChevronDown, FiChevronRight } from "react-icons/fi";
 import type { AgentStep } from "@/app/chat/chatTypes";
-import { AGENT_CONFIG, DEFAULT_CFG } from "./agentConfig";
+import { getAgentCfg } from "./agentConfig";
 import { AgentIcon } from "./AgentIcon";
 import { ToolCard } from "../tool/ToolCard";
 
@@ -11,7 +11,7 @@ type Props = { step: AgentStep; isLast: boolean };
 
 export function DoneStepCard({ step, isLast }: Props) {
   const [open, setOpen] = useState(false);
-  const cfg = AGENT_CONFIG[step.agentName] ?? DEFAULT_CFG;
+  const cfg = getAgentCfg(step.agentName);
 
   return (
     <div className="relative">

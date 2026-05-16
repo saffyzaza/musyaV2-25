@@ -1,28 +1,25 @@
-export type AgentCfg = {
-  color: string;
-  bg: string;
-  border: string;
-  dot: string;
-  letter: string;
-};
+import { AGENT_MAP, PIPELINE_AGENTS } from "@/app/agents";
+import type { AgentVisual } from "@/app/agents/types";
 
-export const PIPELINE_AGENTS = [
-  { name: "Orchestrator", role: "วิเคราะห์และประสานงาน" },
-  { name: "Research Agent", role: "ค้นหาและวิเคราะห์ข้อมูล" },
-  { name: "Synthesizer", role: "สรุปและจัดรูปแบบคำตอบ" },
-] as const;
+// Re-export for components that need the pipeline slot list
+export { PIPELINE_AGENTS };
 
-export const AGENT_CONFIG: Record<string, AgentCfg> = {
-  Orchestrator:     { color: "text-violet-700",  bg: "bg-violet-50",  border: "border-violet-200",  dot: "bg-violet-500",  letter: "O" },
-  "Research Agent": { color: "text-blue-700",    bg: "bg-blue-50",    border: "border-blue-200",    dot: "bg-blue-500",    letter: "R" },
-  Synthesizer:      { color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", letter: "S" },
-};
+// AgentCfg is the same shape as AgentVisual — alias for backward compat
+export type AgentCfg = AgentVisual;
 
 export const DEFAULT_CFG: AgentCfg = {
-  color: "text-gray-700",
-  bg: "bg-gray-50",
+  color:  "text-gray-700",
+  bg:     "bg-gray-50",
   border: "border-gray-200",
-  dot: "bg-gray-400",
+  dot:    "bg-gray-400",
   letter: "?",
 };
 
+export function getAgentCfg(name: string): AgentCfg {
+  return AGENT_MAP[name]?.visual ?? DEFAULT_CFG;
+}
+
+// Derived lookup table for components that use it directly
+export const AGENT_CONFIG: Record<string, AgentCfg> = Object.fromEntries(
+  Object.entries(AGENT_MAP).map(([name, def]) => [name, def.visual]),
+);

@@ -3,7 +3,7 @@ import { useState } from "react";
 import clsx from "clsx";
 import { FiChevronDown, FiChevronRight } from "react-icons/fi";
 import type { AgentStep } from "@/app/chat/chatTypes";
-import { AGENT_CONFIG, DEFAULT_CFG } from "./agentConfig";
+import { getAgentCfg } from "./agentConfig";
 import { DoneStepCard } from "./DoneStepCard";
 
 type Props = { steps: AgentStep[]; messageId: string };
@@ -19,7 +19,7 @@ export function DoneAgentPipeline({ steps, messageId }: Props) {
       >
         <div className="flex -space-x-1 shrink-0">
           {steps.slice(0, 3).map((step, i) => {
-            const cfg = AGENT_CONFIG[step.agentName] ?? DEFAULT_CFG;
+            const cfg = getAgentCfg(step.agentName);
             return (
               <div
                 key={i}

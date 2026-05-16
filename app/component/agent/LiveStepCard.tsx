@@ -3,7 +3,7 @@ import { useState, useEffect } from "react";
 import clsx from "clsx";
 import { FiChevronDown, FiChevronRight } from "react-icons/fi";
 import type { AgentStep } from "@/app/chat/chatTypes";
-import { AGENT_CONFIG, DEFAULT_CFG } from "./agentConfig";
+import { getAgentCfg } from "./agentConfig";
 import { AgentIcon } from "./AgentIcon";
 import { ToolCard } from "../tool/ToolCard";
 
@@ -16,7 +16,7 @@ type Props = {
 
 export function LiveStepCard({ agentName, agentRole, step, isLast }: Props) {
   const status = step?.status ?? "pending";
-  const cfg = AGENT_CONFIG[agentName] ?? DEFAULT_CFG;
+  const cfg = getAgentCfg(agentName);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
