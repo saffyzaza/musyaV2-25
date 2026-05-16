@@ -10,38 +10,178 @@ const APP_TITLE = "Musya Chat";
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
   knowledge_search: "ค้นหาความรู้สุขภาพ",
-  data_analysis: "วิเคราะห์ข้อมูล",
+  data_analysis: "วิเคราะห์ข้อมูล CSV",
   clinical_guidelines: "แนวทางทางคลินิก",
   statistics_tool: "วิเคราะห์สถิติสาธารณสุข",
   nutrition_database: "ฐานข้อมูลโภชนาการ",
   disease_surveillance: "ระบบเฝ้าระวังโรค",
 };
 
-const SYSTEM_PROMPT = `คุณคือระบบ Multi-Agent AI ช่วยงานด้านสุขภาพและข้อมูลสาธารณสุข
+// ─── CSV Finder types & helpers ───────────────────────────────────────────────
+
+type StoredFile = {
+  id: string;
+  name: string;
+  extension: string;
+  previewKind: string;
+  size: number;
+};
+
+type CsvFileData = {
+  id: string;
+  name: string;
+  headers: string[];
+  sampleRows: string[][];
+  totalRows: number;
+};
+
+const splitCsvLine = (line: string): string[] =>
+  line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+
+// Extract short keywords (≥2 chars, no stopwords) from a Thai+English query
+function extractKeywords(query: string): string[] {
+  const stopwords = new Set(["ขอ", "ข้อมูล", "การ", "ให้", "และ", "ใน", "ปี", "จาก", "ที่", "ของ", "มี", "a", "the", "of", "in", "for", "and", "data"]);
+  return query
+    .replace(/[()[\]{}'"""'']/g, " ")
+    .split(/[\s,]+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 2 && !stopwords.has(w));
+}
+
+// Smart read: headers + first 10 rows + ALL rows matching any query keyword
+function parseSmartRows(
+  csvText: string,
+  keywords: string[],
+  maxMatchedRows = 150,
+): { headers: string[]; sampleRows: string[][]; matchedCount: number } {
+  const lines = csvText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return { headers: [], sampleRows: [], matchedCount: 0 };
+
+  const headers = splitCsvLine(lines[0]);
+  const dataLines = lines.slice(1);
+
+  const kwLower = keywords.map((k) => k.toLowerCase());
+
+  const first10 = dataLines.slice(0, 10);
+  const matched = dataLines.filter((line) => {
+    const lower = line.toLowerCase();
+    return kwLower.some((kw) => lower.includes(kw));
+  });
+
+  // Deduplicate: matched rows that are already in first10 don't need repeating
+  const first10Set = new Set(first10);
+  const uniqueMatched = matched.filter((l) => !first10Set.has(l)).slice(0, maxMatchedRows);
+
+  const combined = [...first10, ...uniqueMatched];
+  return {
+    headers,
+    sampleRows: combined.map(splitCsvLine),
+    matchedCount: matched.length,
+  };
+}
+
+function formatCsvContext(files: CsvFileData[]): string {
+  if (files.length === 0) return "";
+  let ctx = "\n\n## ข้อมูล CSV ที่พบในระบบ (ใช้ข้อมูลนี้ในการวิเคราะห์):\n";
+  for (const f of files) {
+    ctx += `\n### ไฟล์: ${f.name}  (ทั้งหมด ${f.totalRows} แถวข้อมูล, แสดง ${f.sampleRows.length} แถวที่เกี่ยวข้อง)\n`;
+    ctx += `คอลัมน์: ${f.headers.join(" | ")}\n`;
+    ctx += `ข้อมูล:\n`;
+    ctx += f.headers.join(",") + "\n";
+    for (const row of f.sampleRows) {
+      ctx += row.join(",") + "\n";
+    }
+  }
+  return ctx;
+}
+
+async function findCsvFiles(
+  query: string,
+): Promise<{ files: CsvFileData[]; csvFinderStep: AgentStep }> {
+  let files: CsvFileData[] = [];
+  let findError = "";
+  const keywords = extractKeywords(query);
+
+  try {
+    const listRes = await fetch(`${APP_URL}/api/files`);
+    if (listRes.ok) {
+      const allFiles = (await listRes.json()) as StoredFile[];
+      const csvFiles = allFiles.filter(
+        (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
+      );
+
+      for (const file of csvFiles.slice(0, 3)) {
+        try {
+          const contentRes = await fetch(`${APP_URL}/api/files/${file.id}`);
+          if (!contentRes.ok) continue;
+          const text = await contentRes.text();
+          const totalRows = text.split(/\r?\n/).filter((l) => l.trim()).length - 1;
+          const { headers, sampleRows, matchedCount } = parseSmartRows(text, keywords);
+          files.push({ id: file.id, name: file.name, headers, sampleRows: sampleRows.slice(0, 160), totalRows });
+          console.log(`[CSV Finder] ${file.name}: ${totalRows} rows total, ${matchedCount} matched keywords [${keywords.join(", ")}], sending ${Math.min(sampleRows.length, 160)} rows`);
+        } catch {
+          /* skip unreadable file */
+        }
+      }
+    } else {
+      findError = "ไม่สามารถเชื่อมต่อ API ไฟล์";
+    }
+  } catch {
+    findError = "เกิดข้อผิดพลาดในการค้นหาไฟล์";
+  }
+
+  const csvFinderStep: AgentStep = {
+    agentName: "CSV Finder",
+    agentRole: "ค้นหาและโหลดไฟล์ข้อมูล",
+    thinking:
+      files.length > 0
+        ? `ค้นหาไฟล์ CSV ในระบบ MinIO พบ ${files.length} ไฟล์ กรองแถวที่ตรงกับคำค้น [${keywords.join(", ")}] แล้วส่งให้ Orchestrator`
+        : findError || "ค้นหาไฟล์ CSV ในระบบ MinIO แต่ไม่พบไฟล์ที่เกี่ยวข้อง",
+    tool: {
+      name: "list_files",
+      displayName: "ค้นหาและกรองข้อมูล CSV ใน MinIO",
+      input: `ค้นหาไฟล์ CSV · กรองด้วยคำค้น: ${keywords.join(", ")}`,
+      output:
+        files.length > 0
+          ? files
+              .map((f) => `${f.name} (${f.headers.length} คอลัมน์, ${f.totalRows} แถวทั้งหมด, ส่ง ${f.sampleRows.length} แถวที่เกี่ยวข้อง)`)
+              .join(" | ")
+          : "ไม่พบไฟล์ CSV",
+    },
+    result:
+      files.length > 0
+        ? `โหลดและกรองข้อมูลจาก ${files.length} ไฟล์เรียบร้อย — ส่งให้ Orchestrator วิเคราะห์`
+        : "ไม่พบไฟล์ CSV ใช้ความรู้ทั่วไปแทน",
+    status: "done",
+  };
+
+  return { files, csvFinderStep };
+}
+
+// ─── System prompt ────────────────────────────────────────────────────────────
+
+function buildSystemPrompt(csvContext: string): string {
+  return `คุณคือระบบ Multi-Agent AI ช่วยงานด้านสุขภาพและข้อมูลสาธารณสุข${csvContext}
 
 ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความนอก JSON:
 {
-  "orchestrator_thinking": "วิเคราะห์คำถามสั้นๆ: ผู้ใช้ถามเรื่อง X ต้องการข้อมูลประเภท Y",
-  "orchestrator_delegation": "มอบหมายให้ Research Agent ค้นหาข้อมูลเรื่อง X ด้วย tool Y",
-  "researcher_thinking": "กำลังค้นหาข้อมูลที่เกี่ยวข้องกับ X",
-  "researcher_tool": "knowledge_search",
-  "researcher_tool_input": "คำค้นหาหรือข้อมูลที่ input เข้า tool",
-  "researcher_findings": "สรุปข้อมูลที่พบจาก tool อย่างย่อ 1-2 ประโยค",
-  "synthesizer_thinking": "รวบรวมข้อมูลจาก Research Agent เพื่อสรุปเป็นคำตอบ",
-  "synthesizer_summary": "คำตอบสรุปสั้นๆ 1 ประโยค",
-  "finalAnswer": "คำตอบฉบับสมบูรณ์ในรูปแบบ Markdown ที่อ่านง่าย ถ้ามีข้อมูลเชิงตัวเลขให้แสดงเป็นตาราง ถ้ามีขั้นตอนให้แสดงเป็น list"
+  "orchestrator_thinking": "วิเคราะห์คำถามและข้อมูลที่มี${csvContext ? " รวมถึงข้อมูล CSV ที่ CSV Finder นำมา" : ""}",
+  "orchestrator_delegation": "มอบหมายให้ Research Agent วิเคราะห์ต่อ",
+  "researcher_thinking": "วิเคราะห์ข้อมูลที่เกี่ยวข้อง${csvContext ? " จากไฟล์ CSV ที่พบ" : ""}",
+  "researcher_tool": "${csvContext ? "data_analysis" : "knowledge_search"}",
+  "researcher_tool_input": "รายละเอียดข้อมูลหรือคำค้นหา",
+  "researcher_findings": "สรุปผลการวิเคราะห์ข้อมูล",
+  "synthesizer_thinking": "รวบรวมและสรุปเป็นคำตอบสุดท้าย",
+  "synthesizer_summary": "คำตอบสั้นๆ 1 ประโยค",
+  "finalAnswer": "คำตอบฉบับสมบูรณ์ใน Markdown${csvContext ? " อ้างอิงข้อมูลจากไฟล์ CSV ถ้าเกี่ยวข้อง ถ้ามีตัวเลขให้แสดงเป็นตาราง" : " ถ้ามีตัวเลขให้แสดงเป็นตาราง"}"
 }
 
 researcher_tool ต้องเป็นหนึ่งใน: knowledge_search, data_analysis, clinical_guidelines, statistics_tool, nutrition_database, disease_surveillance
 
 กรณีคำถามเกี่ยวกับอาการรุนแรงหรือวินิจฉัยโรค: ให้แนะนำพบแพทย์ใน finalAnswer`;
-
-function buildConfigurationError() {
-  return [
-    "ยังไม่ได้ตั้งค่า OpenRouter สำหรับแชต AI",
-    "เพิ่ม OPENROUTER_API_KEY ในไฟล์ .env.local แล้ว restart dev server",
-  ].join("\n");
 }
+
+// ─── OpenRouter call ──────────────────────────────────────────────────────────
 
 function getMessageContent(data: unknown): string {
   const content = (data as { choices?: Array<{ message?: { content?: unknown } }> })?.choices?.[0]?.message?.content;
@@ -72,21 +212,26 @@ type ParsedAgentResult = {
   synthesizerStep: AgentStep;
 };
 
-function parseMultiAgentResponse(content: string): ParsedAgentResult {
+function parseMultiAgentResponse(content: string, hasCsv: boolean): ParsedAgentResult {
   const fallback = (message: string): ParsedAgentResult => ({
     message,
     orchestratorStep: {
       agentName: "Orchestrator",
       agentRole: "วิเคราะห์และประสานงาน",
-      thinking: "วิเคราะห์คำถามและมอบหมายงาน",
-      result: "มอบหมายให้ Research Agent ค้นหาข้อมูล",
+      thinking: "วิเคราะห์คำถามและข้อมูล",
+      result: "มอบหมายให้ Research Agent วิเคราะห์ต่อ",
     },
     researchStep: {
       agentName: "Research Agent",
       agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
-      thinking: "ค้นหาข้อมูลที่เกี่ยวข้อง",
-      tool: { name: "knowledge_search", displayName: "ค้นหาความรู้สุขภาพ", input: "คำถามของผู้ใช้", output: message.slice(0, 120) },
-      result: "พบข้อมูลที่เกี่ยวข้องแล้ว",
+      thinking: hasCsv ? "วิเคราะห์ข้อมูลจากไฟล์ CSV" : "ค้นหาข้อมูลที่เกี่ยวข้อง",
+      tool: {
+        name: hasCsv ? "data_analysis" : "knowledge_search",
+        displayName: hasCsv ? "วิเคราะห์ข้อมูล CSV" : "ค้นหาความรู้สุขภาพ",
+        input: "คำถามของผู้ใช้",
+        output: message.slice(0, 120),
+      },
+      result: "รวบรวมข้อมูลเรียบร้อย",
     },
     synthesizerStep: {
       agentName: "Synthesizer",
@@ -139,6 +284,8 @@ function parseMultiAgentResponse(content: string): ParsedAgentResult {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// ─── POST handler ─────────────────────────────────────────────────────────────
+
 export async function POST(request: Request) {
   const encoder = new TextEncoder();
 
@@ -159,15 +306,29 @@ export async function POST(request: Request) {
         }
 
         if (!process.env.OPENROUTER_API_KEY) {
-          send({ type: "error", message: buildConfigurationError() });
+          send({
+            type: "error",
+            message: "ยังไม่ได้ตั้งค่า OpenRouter — เพิ่ม OPENROUTER_API_KEY ใน .env.local",
+          });
           controller.close();
           return;
         }
 
-        // 1. Orchestrator starts immediately (before LLM call — gives instant feedback)
+        // 1. CSV Finder starts immediately
+        send({ type: "agent_start", agentName: "CSV Finder", agentRole: "ค้นหาและโหลดไฟล์ข้อมูล" });
+
+        // 2. Actually search MinIO for CSV files (smart-filtered by the user's query)
+        const { files: csvFiles, csvFinderStep } = await findCsvFiles(prompt);
+        send({ type: "agent_done", step: csvFinderStep });
+        await sleep(300);
+
+        // 3. Orchestrator starts
         send({ type: "agent_start", agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน" });
 
-        // 2. Call LLM
+        // 4. LLM call with CSV context injected
+        const csvContext = formatCsvContext(csvFiles);
+        const systemPrompt = buildSystemPrompt(csvContext);
+
         const historyText = formatHistory(body.history ?? []);
         const fullPrompt = [
           historyText ? `บริบทการสนทนาก่อนหน้า:\n${historyText}` : "",
@@ -176,11 +337,10 @@ export async function POST(request: Request) {
           .filter(Boolean)
           .join("\n\n");
 
-        const apiKey = process.env.OPENROUTER_API_KEY;
-        const response = await fetch(OPENROUTER_URL, {
+        const apiRes = await fetch(OPENROUTER_URL, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${apiKey}`,
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
             "Content-Type": "application/json",
             "HTTP-Referer": APP_URL,
             "X-Title": APP_TITLE,
@@ -189,15 +349,15 @@ export async function POST(request: Request) {
             model: MODEL,
             temperature: 0.4,
             messages: [
-              { role: "system", content: SYSTEM_PROMPT },
+              { role: "system", content: systemPrompt },
               { role: "user", content: fullPrompt },
             ],
           }),
         });
 
-        const payload = (await response.json()) as unknown;
+        const payload = (await apiRes.json()) as unknown;
 
-        if (!response.ok) {
+        if (!apiRes.ok) {
           const errorMessage = (payload as { error?: { message?: string } })?.error?.message;
           throw new Error(errorMessage || "OpenRouter request failed");
         }
@@ -205,33 +365,31 @@ export async function POST(request: Request) {
         const content = getMessageContent(payload).trim();
         if (!content) throw new Error("OpenRouter returned an empty response");
 
-        const { message, orchestratorStep, researchStep, synthesizerStep } = parseMultiAgentResponse(content);
+        const { message, orchestratorStep, researchStep, synthesizerStep } =
+          parseMultiAgentResponse(content, csvFiles.length > 0);
 
-        // 3. Orchestrator done
+        // 5. Orchestrator done
         send({ type: "agent_done", step: { ...orchestratorStep, status: "done" } });
-        await sleep(350);
+        await sleep(300);
 
-        // 4. Research Agent starts
+        // 6. Research Agent
         send({ type: "agent_start", agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล" });
-        await sleep(1100);
-
-        // 5. Research Agent done
+        await sleep(900);
         send({ type: "agent_done", step: { ...researchStep, status: "done" } });
-        await sleep(350);
+        await sleep(300);
 
-        // 6. Synthesizer starts
+        // 7. Synthesizer
         send({ type: "agent_start", agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ" });
-        await sleep(750);
-
-        // 7. Synthesizer done
+        await sleep(700);
         send({ type: "agent_done", step: { ...synthesizerStep, status: "done" } });
         await sleep(200);
 
-        // 8. Final answer
+        // 8. Final
         send({
           type: "final",
           message,
           agentSteps: [
+            { ...csvFinderStep, status: "done" },
             { ...orchestratorStep, status: "done" },
             { ...researchStep, status: "done" },
             { ...synthesizerStep, status: "done" },
