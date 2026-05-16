@@ -146,6 +146,11 @@ function buildUserPrompt(
 
 // ─── ReAct execution loop (Reason → Act → Observe → repeat) ──────────────────
 
+function getTempForAgent(agentName: string): number {
+  if (agentName === "Synthesizer") return 0.3;
+  return 0.1; // Orchestrator, domain agents, tool ReAct
+}
+
 function getAgentModel(agentName: string, models: ModelConfig): string {
   if (agentName === "Orchestrator") return models.orchestrator;
   if (agentName === "Synthesizer")  return models.synthesizer;
@@ -219,12 +224,6 @@ export async function* runCrew(
   const completedOutputs = new Map<Task, TaskOutput>();
   let dynamicTasks: Task[] = [...crew.tasks];
   let planSent = false;
-
-  // Temperature per agent type: data agents use 0.1, synthesizer 0.2
-  function getTempForAgent(agentName: string): number {
-    if (agentName === "Synthesizer") return 0.2;
-    return 0.1; // Orchestrator, domain agents, tool ReAct
-  }
 
   // Wrap callLLM for multi-turn (ReAct loop) — model + temperature per call
   const callMultiTurn: LLMMultiTurn = async (messages, model, temperature) => {

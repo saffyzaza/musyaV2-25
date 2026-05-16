@@ -55,9 +55,10 @@ const csvReader: ExecutableTool = {
     const preview = filtered.slice(0, 50);
 
     // ⑤ Source header — shown to LLM and user so data can be verified
+    const fileUrl = `/api/files/${file_id}`;
     const sourceLine = fileMeta
-      ? `📄 SOURCE FILE: "${fileMeta.name}" | path: ${fileMeta.path} | ID: ${file_id}`
-      : `📄 SOURCE FILE ID: ${file_id}`;
+      ? `📄 SOURCE FILE: [${fileMeta.name}](${fileUrl}) | path: ${fileMeta.path} | URL: ${fileUrl}`
+      : `📄 SOURCE FILE: [ID:${file_id}](${fileUrl}) | URL: ${fileUrl}`;
 
     const filterNote =
       filtered.length === 0
