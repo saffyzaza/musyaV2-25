@@ -185,63 +185,6 @@ function fetchFilteredRows(
   return { filteredHeaders, filteredRows, matchedCount: matched.length };
 }
 
-// ─── File domain analysis (LLM-based) ────────────────────────────────────────
-
-type FileDomainResult = {
-  file_domains: Record<string, string>; // fileId → domain label
-  relevant_file_ids: string[];
-  reasoning: string;
-};
-
-async function analyzeFileDomains(
-  files: StoredFile[],
-  query: string,
-): Promise<FileDomainResult> {
-  if (files.length === 0) return { file_domains: {}, relevant_file_ids: [], reasoning: "ไม่มีไฟล์" };
-
-  const fileList = files
-    .map((f) => `- ID: ${f.id} | path: ${f.path ?? f.name}`)
-    .join("\n");
-
-  try {
-    const raw = await callLLM(
-      [
-        {
-          role: "system",
-          content: "คุณเป็น AI วิเคราะห์ domain ของไฟล์ข้อมูลจากชื่อโฟลเดอร์และชื่อไฟล์ ตอบ JSON เท่านั้น ห้ามมีข้อความอื่น",
-        },
-        {
-          role: "user",
-          content: `รายการไฟล์ CSV ในระบบ:
-${fileList}
-
-คำถามของผู้ใช้: "${query}"
-
-วิเคราะห์ domain ของแต่ละไฟล์จากชื่อโฟลเดอร์และชื่อไฟล์ แล้วเลือกเฉพาะไฟล์ที่เกี่ยวข้องกับคำถาม ตอบ JSON:
-{
-  "file_domains": {
-    "ID_ไฟล์": "domain ของไฟล์นี้ เช่น 'ข้อมูลการฆ่าตัวตาย', 'อุบัติเหตุทางถนน', 'โรคมะเร็ง'"
-  },
-  "relevant_file_ids": ["ID ของไฟล์ที่เกี่ยวข้องกับคำถามเท่านั้น ถ้าไม่มีให้ส่ง []"],
-  "reasoning": "เหตุผลสั้นๆ ว่า domain ของแต่ละไฟล์คืออะไร และเลือกไฟล์ไหนเพราะอะไร"
-}`,
-        },
-      ],
-      0.1,
-    );
-
-    const parsed = parseJson<FileDomainResult>(raw);
-    return {
-      file_domains: parsed.file_domains ?? {},
-      relevant_file_ids: Array.isArray(parsed.relevant_file_ids) ? parsed.relevant_file_ids : [],
-      reasoning: parsed.reasoning ?? "",
-    };
-  } catch {
-    // Fallback: no files selected
-    return { file_domains: {}, relevant_file_ids: [], reasoning: "วิเคราะห์ไม่สำเร็จ" };
-  }
-}
-
 // ─── Main CSV Finder ──────────────────────────────────────────────────────────
 
 async function findCsvFiles(query: string): Promise<{
@@ -264,18 +207,7 @@ async function findCsvFiles(query: string): Promise<{
         (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
       );
 
-      // AI analyzes domain of each file from folder+filename, then picks relevant ones
-      domainAnalysis = await analyzeFileDomains(allCsvFiles, query);
-
-      const csvFiles = allCsvFiles
-        .filter((f) => domainAnalysis.relevant_file_ids.includes(f.id))
-        .slice(0, 2);
-
-      console.log(
-        `[CSV Finder] domains: ${JSON.stringify(domainAnalysis.file_domains)} → selected: ${csvFiles.map((f) => f.name).join(", ") || "none"}`,
-      );
-
-      for (const file of csvFiles) {
+      for (const file of csvFiles.slice(0, 3)) {
         try {
           // Step 1: scan headers
           const { headers, allLines } = await scanCsvHeaders(file.id);
