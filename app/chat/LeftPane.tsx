@@ -40,6 +40,7 @@ const TOOL_ICONS: Record<string, string> = {
   disease_surveillance: "🦠",
   list_files: "📁",
   read_csv: "📋",
+  analyze_and_fetch: "🧠",
 };
 
 function AgentIcon({ name }: { name: string }) {
