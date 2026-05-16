@@ -7,12 +7,15 @@ export type AgentTool = {
   output: string;
 };
 
+export type AgentStepStatus = "pending" | "running" | "done";
+
 export type AgentStep = {
   agentName: string;
   agentRole: string;
   thinking: string;
   tool?: AgentTool | null;
   result: string;
+  status?: AgentStepStatus;
 };
 
 export type ChatSessionMessage = {
