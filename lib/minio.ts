@@ -9,10 +9,18 @@ export const minioClient = new Minio.Client({
 })
 
 export const BUCKET_NAME = process.env.MINIO_BUCKET || 'fileapa'
+export const APA_BUCKET_NAME = process.env.MINIO_APA_BUCKET || 'apa-docs'
 
 export async function ensureBucket(): Promise<void> {
   const exists = await minioClient.bucketExists(BUCKET_NAME)
   if (!exists) {
     await minioClient.makeBucket(BUCKET_NAME, 'us-east-1')
+  }
+}
+
+export async function ensureApaBucket(): Promise<void> {
+  const exists = await minioClient.bucketExists(APA_BUCKET_NAME)
+  if (!exists) {
+    await minioClient.makeBucket(APA_BUCKET_NAME, 'us-east-1')
   }
 }

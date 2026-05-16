@@ -3,6 +3,8 @@
  * Files are stored server-side in MinIO object storage
  */
 
+import type { ApaResult } from './apaTypes'
+
 export type StoredFile = {
   id: string
   name: string
@@ -11,6 +13,7 @@ export type StoredFile = {
   size: number
   previewKind: 'pdf' | 'csv' | 'xlsx' | 'text' | 'unsupported'
   uploadedAt: number
+  apa: ApaResult | null
 }
 
 /**
@@ -22,7 +25,10 @@ export async function saveFile(file: File, path: string): Promise<StoredFile> {
   formData.append('path', path)
 
   const res = await fetch('/api/files/upload', { method: 'POST', body: formData })
-  if (!res.ok) throw new Error('Upload failed')
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null
+    throw new Error(payload?.error || 'Upload failed')
+  }
   return res.json() as Promise<StoredFile>
 }
 

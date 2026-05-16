@@ -1,106 +1,81 @@
 "use client";
-import { useState } from "react";
-import { IoTrainOutline, IoChevronForward } from "react-icons/io5";
+import { useSyncExternalStore } from "react";
+import { useParams } from "next/navigation";
 import clsx from "clsx";
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "ai";
-  text: string;
-  timestamp: string;
-}
+import type { ChatSessionState } from "./chatTypes";
+import { createEmptyChatSessionState, getChatSessionState, subscribeToChatSession } from "./chatSessionStore";
 
-const MOCK_MESSAGES: ChatMessage[] = [
-  {
-    id: "1",
-    role: "user",
-    text: "สวัสดีจ้า ช่วยสรุปข้อมูลให้หน่อย",
-    timestamp: "10:41 AM",
-  },
-  {
-    id: "2",
-    role: "ai",
-    text: "ได้เลยครับ! วันนี้มีอะไรให้ผมช่วยสรุปหรือค้นหาข้อมูลแจ้งมาได้เลยครับ ผมพร้อมเสมอ 😊",
-    timestamp: "10:42 AM",
-  },
-];
+const PREVIEW_SESSION: ChatSessionState = createEmptyChatSessionState("preview-session");
 
 export const LeftPane = () => {
-    const [isThinkingExpanded, setIsThinkingExpanded] = useState(true);
+    const params = useParams<{ sessionId?: string }>();
+    const sessionId = typeof params?.sessionId === "string" ? params.sessionId : null;
+    const session = useSyncExternalStore(
+        (onStoreChange) => subscribeToChatSession(sessionId, onStoreChange),
+        () => {
+            if (!sessionId) {
+                return PREVIEW_SESSION;
+            }
+
+            return getChatSessionState(sessionId);
+        },
+        () => PREVIEW_SESSION,
+    );
 
     return (
         <div className="flex-1 h-full border-r border-gray-200 p-4 bg-white shrink-0 shadow-sm overflow-y-auto rounded-lg flex flex-col">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Left Content</h2>
+            <div className="mb-4">
+                <h2 className="text-lg font-bold text-gray-800">Left Content</h2>
+                {sessionId ? (
+                    <div className="mt-1 flex items-center gap-2 text-xs text-gray-400">
+                        <span>Session: {sessionId}</span>
+                        <span
+                            className={clsx(
+                                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                session.status === "completed" && "bg-emerald-50 text-emerald-600",
+                                session.status === "running" && "bg-amber-50 text-amber-600",
+                                session.status === "failed" && "bg-rose-50 text-rose-600",
+                                session.status === "idle" && "bg-slate-100 text-slate-500",
+                            )}
+                        >
+                            {session.status}
+                        </span>
+                    </div>
+                ) : null}
+            </div>
             
             <div className="flex flex-col space-y-4">
-                {MOCK_MESSAGES.map((msg) => (
+                {session.messages.length ? session.messages.map((msg) => (
                     msg.role === "user" ? (
                         <div key={msg.id} className="flex flex-col items-end">
-                            <div className="bg-[#eb6f45f1] text-white px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-sm shadow-sm leading-relaxed">
+                            <div className="bg-[#eb6f45f1] text-white px-4 py-3 rounded-2xl rounded-tr-sm max-w-[85%] text-sm shadow-sm leading-relaxed whitespace-pre-wrap">
                                 {msg.text}
                             </div>
                             <span className="text-xs text-gray-400 mt-1 mr-1">{msg.timestamp}</span>
                         </div>
                     ) : (
                         <div key={msg.id} className="flex flex-col items-start">
-                            <div className="bg-gray-50 border border-gray-200 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] text-sm shadow-sm leading-relaxed">
+                            <div className="bg-gray-50 border border-gray-200 text-gray-800 px-4 py-3 rounded-2xl rounded-tl-sm max-w-[85%] text-sm shadow-sm leading-relaxed whitespace-pre-wrap">
                                 {msg.text}
                             </div>
                             <span className="text-xs text-gray-400 mt-1 ml-1">{msg.timestamp}</span>
                         </div>
                     )
-                ))}
-            </div>
-
-            {/* AI Thought Process Indicator (แบบ Accordion) */}
-            <div className="mt-6 mb-4 w-full">
-                <div className="flex items-center justify-between w-full mb-3">
-                    <button 
-                        onClick={() => setIsThinkingExpanded(!isThinkingExpanded)}
-                        className="flex items-center space-x-2 text-sm text-[#b0b0b0] font-medium hover:text-gray-600 transition-colors focus:outline-none group"
-                    >
-                        <IoTrainOutline size={18} className={clsx("transition-transform duration-300", isThinkingExpanded && "text-[#b0b0b0]")} />
-                        <span>Thinking...</span>
-                        <IoChevronForward 
-                            size={14} 
-                            className={clsx(
-                                "transition-transform duration-300 ease-in-out",
-                                isThinkingExpanded && "rotate-90"
-                            )} 
-                        />
-                    </button>
-                </div>
-
-                <div 
-                    className={clsx(
-                        "grid transition-all duration-300 ease-in-out",
-                        isThinkingExpanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"
-                    )}
-                >
-                    <div className="overflow-hidden">
-                        <div className="border-l-[2px] border-gray-200 ml-2.5 pl-6 py-2 text-sm text-gray-400 flex flex-col space-y-4">
-                            <div className="space-y-1.5">
-                                <h3 className="font-semibold text-gray-600">1. Understand the User's Request:</h3>
-                                <ul className="list-disc list-outside pl-4 space-y-1.5 text-gray-500 marker:text-gray-400">
-                                    <li><strong>Query:</strong> "หาข้อมูล เกมเอาชีวิตรอด" (Find information about survival games).</li>
-                                    <li><strong>Intent:</strong> The user is asking for an overview, recommendations, or general information about the "survival game" genre.</li>
-                                    <li><strong>Tone:</strong> Informative, engaging, and well-structured.</li>
-                                    <li><strong>Language:</strong> Thai.</li>
-                                </ul>
-                            </div>
-                            
-                            <div className="space-y-1.5">
-                                <h3 className="font-semibold text-gray-600">2. Deconstruct the "Survival Game" Genre:</h3>
-                                <ul className="list-disc list-outside pl-4 space-y-1.5 text-gray-500 marker:text-gray-400">
-                                    <li><em>What is it?</em> Games where the primary goal is to stay alive in a hostile environment.</li>
-                                    <li><em>Core Mechanics:</em> Gathering resources, crafting, building shelters, managing stats (hunger, thirst, health, stamina), exploration, combat (PvE or PvP).</li>
-                                    <li><em>Sub-genres:</em> Open-world survival craft, Battle Royale, Survival Horror, Colony Sim (often has survival elements).</li>
-                                </ul>
-                            </div>
-                        </div>
+                )) : (
+                    <div className="rounded-2xl border border-dashed border-[#f0dfd8] bg-[#fcfbf9] p-5 text-sm leading-relaxed text-gray-500">
+                        {sessionId
+                            ? "เริ่มพิมพ์คำถามด้านล่างเพื่อเริ่มสนทนาใน session นี้"
+                            : "สร้าง session ใหม่โดยพิมพ์ข้อความในช่องแชตด้านล่าง"}
                     </div>
-                </div>
+                )}
             </div>
+
+            {session.error ? (
+                <div className="mt-6 rounded-2xl bg-[#fff4f2] p-3 text-sm text-[#a04222] ring-1 ring-[#f0dfd8]">
+                    {session.error}
+                </div>
+            ) : null}
         </div>
     );
 };

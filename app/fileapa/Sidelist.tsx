@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import {
 	FiChevronDown,
 	FiChevronRight,
@@ -49,7 +48,6 @@ type SidelistProps = {
 	onSelect: (id: string) => void
 	onRemove: (id: string) => void
 	onRename: (id: string) => void
-	onViewFullscreen: (id: string) => void
 	onMoveItem: (itemId: string, targetFolderPath: string) => void
 	onCreateFolder: (parentPath: string) => void
 	onUploadToFolder: (folderPath: string) => void
@@ -165,14 +163,6 @@ function buildTree(items: ExplorerItem[], virtualFolders: VirtualFolder[]): Tree
 	return root
 }
 
-function kindLabel(kind: ExplorerItem['previewKind']) {
-	if (kind === 'xlsx') {
-		return 'sheet'
-	}
-
-	return kind
-}
-
 function countItems(node: TreeNode): { files: number; folders: number } {
 	if (node.kind === 'file') {
 		return { files: 1, folders: 0 }
@@ -210,12 +200,10 @@ export default function Sidelist({
 	onSelect,
 	onRemove,
 	onRename,
-	onViewFullscreen,
 	onMoveItem,
 	onCreateFolder,
 	onUploadToFolder,
 }: SidelistProps) {
-	const router = useRouter()
 	const tree = useMemo(() => buildTree(items, virtualFolders), [items, virtualFolders])
 	const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set(['root']))
 	const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)

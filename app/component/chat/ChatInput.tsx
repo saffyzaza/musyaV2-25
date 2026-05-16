@@ -1,16 +1,28 @@
 "use client"
 import { useState, useRef, useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { IoSend } from "react-icons/io5";
 import { HiOutlineLightBulb, HiOutlineSparkles } from "react-icons/hi";
 import { FiPlus, FiList, FiPaperclip, FiImage, FiCamera, FiFileText, FiEdit, FiDatabase } from "react-icons/fi";
 import { TbGitCompare } from "react-icons/tb";
+
+import type { ChatRouteResponse } from "../../chat/chatTypes";
+import {
+    createChatSessionMessage,
+    generateChatSessionId,
+    getChatSessionState,
+    saveChatSessionState,
+} from "../../chat/chatSessionStore";
 
 type ChatInputProps = {
     onToggleDatabaseExplorer?: () => void;
 };
 
 export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
+    const router = useRouter();
+    const pathname = usePathname();
     const [message, setMessage] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAddMenu, setShowAddMenu] = useState(false);
     const [showToolsMenu, setShowToolsMenu] = useState(false);
     const wrapperRef = useRef<HTMLDivElement>(null);
@@ -26,10 +38,83 @@ export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
-    const handleSend = () => {
-        if (message.trim()) {
-            console.log("Send message:", message);
-            setMessage("");
+    const handleSend = async () => {
+        const trimmedMessage = message.trim();
+
+        if (!trimmedMessage || isSubmitting) {
+            return;
+        }
+
+        const currentSessionId = pathname.match(/^\/chat\/sessions\/([^/]+)$/)?.[1];
+        const sessionId = currentSessionId ?? generateChatSessionId();
+        const currentState = getChatSessionState(sessionId);
+        const nextMessages = [
+            ...currentState.messages,
+            createChatSessionMessage("user", trimmedMessage),
+        ];
+
+        saveChatSessionState(sessionId, {
+            ...currentState,
+            sessionId,
+            status: "running",
+            error: undefined,
+            lastUserPrompt: trimmedMessage,
+            messages: nextMessages,
+        });
+
+        setMessage("");
+        setShowAddMenu(false);
+        setShowToolsMenu(false);
+
+        if (!currentSessionId) {
+            router.push(`/chat/sessions/${sessionId}`);
+        }
+
+        setIsSubmitting(true);
+
+        try {
+            const response = await fetch("/api/chat", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    sessionId,
+                    prompt: trimmedMessage,
+                    history: nextMessages,
+                }),
+            });
+
+            const payload = (await response.json()) as ChatRouteResponse | { error?: string };
+
+            if (!response.ok || !("message" in payload)) {
+                const errorMessage = "error" in payload ? payload.error : undefined;
+                throw new Error(errorMessage || "ไม่สามารถติดต่อ AI ได้");
+            }
+
+            saveChatSessionState(sessionId, {
+                ...getChatSessionState(sessionId),
+                sessionId,
+                status: "completed",
+                error: undefined,
+                messages: [...getChatSessionState(sessionId).messages, createChatSessionMessage("ai", payload.message)],
+                lastUserPrompt: trimmedMessage,
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : "ไม่สามารถติดต่อ AI ได้";
+
+            saveChatSessionState(sessionId, {
+                ...getChatSessionState(sessionId),
+                sessionId,
+                status: "failed",
+                error: errorMessage,
+                messages: [
+                    ...getChatSessionState(sessionId).messages,
+                    createChatSessionMessage("ai", `ระบบ AI ตอบกลับไม่สำเร็จ: ${errorMessage}`),
+                ],
+            });
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -99,13 +184,19 @@ export const ChatInput = ({ onToggleDatabaseExplorer }: ChatInputProps) => {
                     type="text" 
                     value={message}
                     onChange={(e) => setMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            void handleSend();
+                        }
+                    }}
                     placeholder="พิมพ์ข้อความของคุณ..." 
                     className="flex-1 outline-none bg-transparent text-gray-700 placeholder-gray-400 py-1"
                 />
                 <button 
-                    onClick={handleSend}
-                    disabled={!message.trim()}
+                    onClick={() => {
+                        void handleSend();
+                    }}
+                    disabled={!message.trim() || isSubmitting}
                     className="bg-[#949eb0] hover:bg-[#7b8599] text-white rounded-lg p-1.5 ml-2 disabled:opacity-50 transition-colors flex items-center justify-center transform hover:scale-105 active:scale-95"
                     title="Send message"
                 >

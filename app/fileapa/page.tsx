@@ -66,6 +66,10 @@ function renamePath(path: string, nextName: string) {
   return segments.join('/')
 }
 
+function goToApaList(router: ReturnType<typeof useRouter>, fileId: string) {
+  router.push(`/fileapa/listapa?fileId=${encodeURIComponent(fileId)}`)
+}
+
 export default function Page() {
   const router = useRouter()
   const [items, setItems] = useState<UploadedEntry[]>([])
@@ -128,7 +132,7 @@ export default function Page() {
       }
 
       if (savedIds.length > 0) {
-        router.push(`/fileapa/${savedIds[0]}`)
+        goToApaList(router, savedIds[0])
       }
     } catch (error) {
       console.error('Error uploading files:', error)
@@ -195,10 +199,6 @@ export default function Page() {
     }
   }
 
-  const handleOpenFullscreen = (itemId: string) => {
-    router.push(`/fileapa/${itemId}`)
-  }
-
   const handleCreateFolder = (parentPath: string = '') => {
     const folderName = window.prompt('Folder name')?.trim()
 
@@ -252,7 +252,7 @@ export default function Page() {
       }
 
       if (savedIds.length > 0) {
-        router.push(`/fileapa/${savedIds[0]}`)
+        goToApaList(router, savedIds[0])
       }
     } catch (error) {
       console.error('Error uploading files to folder:', error)
@@ -320,7 +320,7 @@ export default function Page() {
 
       // Redirect to the first uploaded file
       if (savedIds.length > 0) {
-        router.push(`/fileapa/${savedIds[0]}`)
+        goToApaList(router, savedIds[0])
       }
     } catch (error) {
       console.error('Error dropping files:', error)
@@ -354,7 +354,7 @@ export default function Page() {
           ? 'border-[#eb6f45f1] border-2 bg-[#fff3ee] shadow-lg' 
           : 'border-gray-100 bg-[#f7f4f3f1]'
       }`}>
-        <div className="flex min-h-0 flex-1 flex-col border-b border-gray-200 xl:max-w-[340px] xl:border-b-0 xl:border-r">
+        <div className="flex min-h-0 flex-1 flex-col border-b border-gray-200 xl:max-w-85 xl:border-b-0 xl:border-r">
           <div className="border-b border-gray-200 px-4 py-3">
             <div className="flex items-center justify-between">
               <div>
@@ -426,7 +426,6 @@ export default function Page() {
             onSelect={setSelectedId}
             onRemove={handleRemoveItem}
             onRename={handleRenameItem}
-            onViewFullscreen={handleOpenFullscreen}
             onMoveItem={handleMoveItem}
             onCreateFolder={handleCreateFolder}
             onUploadToFolder={handleUploadToFolder}
