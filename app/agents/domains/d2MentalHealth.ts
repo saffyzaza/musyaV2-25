@@ -10,6 +10,8 @@ const d2MentalHealth: Agent = {
     "ข้อมูล Suicide Surveillance, ICD-10 F-codes, และมาตรฐาน WHO Mental Health Atlas " +
     "เชี่ยวชาญการวิเคราะห์ข้อมูลรายจังหวัด รายเพศ รายช่วงอายุ และปัจจัยเสี่ยง",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "statistics_tool",      description: "วิเคราะห์สถิติสุขภาพจิตและการฆ่าตัวตายรายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและปัจจัยเสี่ยงสุขภาพจิต" },
     { name: "disease_surveillance", description: "ข้อมูลระบบเฝ้าระวังการฆ่าตัวตายและสุขภาพจิต" },

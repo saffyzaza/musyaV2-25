@@ -10,6 +10,8 @@ const d6CommunicableDisease: Agent = {
     "IHR (International Health Regulations), โรคประจำถิ่น โรคอุบัติใหม่ " +
     "และการวิเคราะห์การระบาดของโรคทั้ง VBD, WBD, respiratory diseases และโรคอาหารเป็นพิษ",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "disease_surveillance", description: "ระบบเฝ้าระวังโรคติดต่อ รายงาน 506" },
     { name: "statistics_tool",      description: "สถิติอัตราป่วย อัตราตาย รายโรค รายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและรูปแบบการระบาด" },

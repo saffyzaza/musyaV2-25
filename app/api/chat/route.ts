@@ -85,7 +85,8 @@ export async function POST(request: Request) {
         const collectedSteps: AgentStep[] = [];
 
         // Run crew — each agent makes its own real LLM call (CrewAI sequential process)
-        for await (const event of runCrew(healthCrew, { query }, callLLM)) {
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        for await (const event of runCrew(healthCrew, { query }, callLLM, appUrl)) {
           if (event.type === "crew_plan") {
             send({ type: "crew_plan", agents: event.agents });
           } else if (event.type === "task_start") {

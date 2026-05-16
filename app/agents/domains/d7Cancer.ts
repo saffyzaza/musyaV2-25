@@ -10,6 +10,8 @@ const d7Cancer: Agent = {
     "ICD-10 C/D codes, การจัดระยะมะเร็ง, ข้อมูล GLOBOCAN, " +
     "โปรแกรมคัดกรองมะเร็งปากมดลูก เต้านม และลำไส้ใหญ่ของกระทรวงสาธารณสุข",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "statistics_tool",      description: "สถิติอุบัติการณ์ อัตราตาย มะเร็งรายชนิด รายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและปัจจัยเสี่ยงมะเร็ง" },
     { name: "clinical_guidelines",  description: "แนวทางการคัดกรอง วินิจฉัย และรักษามะเร็ง" },

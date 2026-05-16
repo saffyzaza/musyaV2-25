@@ -10,6 +10,8 @@ const d5ElderlyCare: Agent = {
     "ข้อมูลสำรวจผู้สูงอายุในประเทศไทย (THAS), ระบบ ADL/iADL, " +
     "การดูแลผู้สูงอายุที่บ้านและในสถาบัน รวมถึงผลกระทบของสังคมสูงวัยต่อระบบสาธารณสุขไทย",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "statistics_tool",      description: "สถิติผู้สูงอายุ สัดส่วนประชากร ภาวะพึ่งพิง" },
     { name: "data_analysis",        description: "วิเคราะห์ข้อมูลสุขภาพและคุณภาพชีวิตผู้สูงอายุ" },
     { name: "clinical_guidelines",  description: "แนวทางการดูแลและรักษาผู้สูงอายุ" },

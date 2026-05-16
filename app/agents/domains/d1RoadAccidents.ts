@@ -10,6 +10,8 @@ const d1RoadAccidents: Agent = {
     "โรงพยาบาล, ตำรวจ และ WHO Global Road Safety Observatory " +
     "เชี่ยวชาญในการแยกแยะประเภทอุบัติเหตุ กลุ่มเสี่ยง และปัจจัยที่เกี่ยวข้อง",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "statistics_tool",      description: "วิเคราะห์สถิติอุบัติเหตุทางถนนรายปี รายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและรูปแบบการเกิดอุบัติเหตุ" },
     { name: "disease_surveillance", description: "ข้อมูลการบาดเจ็บและเสียชีวิตจากระบบเฝ้าระวัง" },

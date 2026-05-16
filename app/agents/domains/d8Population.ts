@@ -10,6 +10,8 @@ const d8Population: Agent = {
     "ข้อมูล สสจ., กรมการปกครอง, UN Population Division, " +
     "การวิเคราะห์ Life Table, Demographic Transition และผลกระทบโครงสร้างประชากรต่อระบบสุขภาพ",
   tools: [
+    { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
+    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "statistics_tool",      description: "สถิติประชากร อัตราเกิด อัตราตาย อัตราเจริญพันธุ์" },
     { name: "data_analysis",        description: "วิเคราะห์โครงสร้างและแนวโน้มประชากร" },
     { name: "knowledge_search",     description: "ค้นหาข้อมูลวิชาการด้านประชากรศาสตร์" },
