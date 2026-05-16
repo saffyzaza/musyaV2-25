@@ -1,8 +1,70 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Readable } from 'stream'
+import { readApaMetadata, removeApaMetadata } from '@/lib/fileApaMetadata'
 import { minioClient, BUCKET_NAME, ensureBucket } from '@/lib/minio'
+import { buildApaString, buildFallbackApaResult, canGenerateApa, extractYear } from '@/lib/apa'
 
 type RouteParams = { params: Promise<{ fileId: string }> }
+
+function decodeApaMeta(meta: Record<string, unknown>) {
+  const author = decodeURIComponent((meta['apaauthor'] as string) || '')
+  const researchersRaw = decodeURIComponent((meta['aparesearchers'] as string) || '[]')
+  const title = decodeURIComponent((meta['apatitle'] as string) || '')
+  const abstract = decodeURIComponent((meta['apaabstract'] as string) || '')
+  const researchers = (() => {
+    try {
+      const parsed = JSON.parse(researchersRaw) as unknown
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)) : []
+    } catch {
+      return []
+    }
+  })()
+
+  if (!author && !researchers.length && !title && !abstract) {
+    return null
+  }
+
+  return {
+    Author: author,
+    Researchers: researchers,
+    Title: title,
+    Abstract: abstract,
+  }
+}
+
+function getApaFromMeta(meta: Record<string, unknown>, fileId: string) {
+  const decoded = decodeApaMeta(meta)
+
+  if (decoded) {
+    return decoded
+  }
+
+  const name = decodeURIComponent((meta['name'] as string) || fileId)
+
+  if (!canGenerateApa(name)) {
+    return null
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  const fallback = buildFallbackApaResult({
+    fileName: name,
+    fileUrl: `${appUrl}/api/files/${fileId}?download=1`,
+    projectInfo: `Uploaded: ${name} | Bucket: ${BUCKET_NAME} | ID: ${fileId}`,
+  })
+
+  const base = decoded || fallback
+
+  return {
+    ...base,
+    ProjectInfo: `Uploaded: ${name} | Bucket: ${BUCKET_NAME} | ID: ${fileId}`,
+    APA_String: buildApaString({
+      author: base.Author,
+      year: extractYear(name),
+      title: base.Title || name,
+      fileUrl: `${appUrl}/api/files/${fileId}?download=1`,
+    }),
+  }
+}
 
 // GET /api/files/[fileId] — stream file content from MinIO
 export async function GET(request: NextRequest, { params }: RouteParams) {
@@ -18,6 +80,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     }
 
     const meta = stat.metaData || {}
+    const sidecarApa = await readApaMetadata(fileId)
 
     if (metaOnly) {
       return NextResponse.json({
@@ -28,6 +91,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         size: parseInt((meta['size'] as string) || '0', 10),
         previewKind: (meta['previewkind'] as string) || 'unsupported',
         uploadedAt: parseInt((meta['uploadedat'] as string) || '0', 10),
+        apa: sidecarApa || getApaFromMeta(meta, fileId),
       })
     }
 
@@ -51,8 +115,8 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         'Content-Type': contentType,
         'Content-Length': stat.size.toString(),
         'Content-Disposition': isDownload
-          ? `attachment; filename="${encodeURIComponent(fileName)}"`
-          : 'inline',
+          ? `attachment; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+          : `inline; filename="${encodeURIComponent(fileName)}"; filename*=UTF-8''${encodeURIComponent(fileName)}`,
         'Cache-Control': 'private, max-age=3600',
       },
     })
@@ -67,6 +131,7 @@ export async function DELETE(_request: NextRequest, { params }: RouteParams) {
   try {
     const { fileId } = await params
     await minioClient.removeObject(BUCKET_NAME, fileId)
+    await removeApaMetadata(fileId)
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Delete file error:', error)
@@ -123,6 +188,8 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
       'x-amz-meta-previewkind': newPreviewKind,
       'x-amz-meta-size': (oldMeta['size'] as string) || '0',
       'x-amz-meta-uploadedat': (oldMeta['uploadedat'] as string) || '0',
+      'x-amz-meta-apaauthor': (oldMeta['apaauthor'] as string) || '',
+      'x-amz-meta-apatitle': (oldMeta['apatitle'] as string) || '',
     }
 
     await minioClient.putObject(BUCKET_NAME, fileId, stream, buffer.length, newMeta)

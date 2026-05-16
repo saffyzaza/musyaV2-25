@@ -18,6 +18,7 @@ const HISTORY_ITEMS = [
 const MENU_ITEMS = [
     {
         label: 'New chat',
+        href: '/',
         shortcut: '',
         icon: IoAddOutline,
         iconSize: 16,
@@ -373,7 +374,16 @@ export const Sidebar = ({ showDatabaseExplorer = false }: SidebarProps) => {
                 
                 <div className="flex flex-col mt-2 space-y-1 text-gray-800">
                     {MENU_ITEMS.map((item, index) => (
-                        <button key={index} className="group relative flex items-center gap-2 px-1 py-1 hover:bg-[#f79d7f] rounded-lg transition-colors w-full text-left">
+                        <button
+                            key={index}
+                            type="button"
+                            onClick={() => {
+                                if (item.href) {
+                                    router.push(item.href)
+                                }
+                            }}
+                            className="group relative flex items-center gap-2 px-1 py-1 hover:bg-[#f79d7f] rounded-lg transition-colors w-full text-left"
+                        >
                             <div className={item.iconContainerClass}>
                                 <item.icon size={item.iconSize} className="" />
                             </div>

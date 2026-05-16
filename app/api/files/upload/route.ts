@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { Readable } from 'stream'
+import { writeApaMetadata } from '@/lib/fileApaMetadata'
 import { minioClient, BUCKET_NAME, ensureBucket } from '@/lib/minio'
+import { canGenerateApa, generateApaResult, trimMetadataValue, trimResearchers } from '@/lib/apa'
 
 function generateFileId(): string {
   const min = 100000
@@ -56,10 +58,29 @@ export async function POST(request: NextRequest) {
     const previewKind = getPreviewKind(file.name, mimeType)
     const uploadedAt = Date.now()
     const filePath = path || file.name
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
     const arrayBuffer = await file.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
     const stream = Readable.from(buffer)
+    const fileUrl = `${appUrl}/api/files/${fileId}?download=1`
+    let apa = null
+
+    if (canGenerateApa(file.name)) {
+      try {
+        apa = await generateApaResult({
+          buffer,
+          fileName: file.name,
+          fileUrl,
+          projectInfo: `Uploaded: ${file.name} | Bucket: ${BUCKET_NAME} | ID: ${fileId}`,
+        })
+      } catch (error) {
+        console.warn('APA generation skipped for upload:', {
+          fileName: file.name,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
 
     const metaData = {
       'Content-Type': mimeType,
@@ -69,9 +90,19 @@ export async function POST(request: NextRequest) {
       'x-amz-meta-previewkind': previewKind,
       'x-amz-meta-size': file.size.toString(),
       'x-amz-meta-uploadedat': uploadedAt.toString(),
+      'x-amz-meta-apatitle': encodeURIComponent(trimMetadataValue(apa?.Title || '', 240)),
+      'x-amz-meta-apaauthor': encodeURIComponent(trimMetadataValue(apa?.Author || '', 180)),
     }
 
     await minioClient.putObject(BUCKET_NAME, fileId, stream, buffer.length, metaData)
+
+    if (apa) {
+      await writeApaMetadata(fileId, {
+        ...apa,
+        Researchers: trimResearchers(apa.Researchers || []),
+        Abstract: trimMetadataValue(apa.Abstract || '', 6000),
+      })
+    }
 
     return NextResponse.json({
       id: fileId,
@@ -81,9 +112,11 @@ export async function POST(request: NextRequest) {
       size: file.size,
       previewKind,
       uploadedAt,
+      apa,
     })
   } catch (error) {
     console.error('Upload error:', error)
-    return NextResponse.json({ error: 'Upload failed' }, { status: 500 })
+    const message = error instanceof Error ? error.message : 'Upload failed'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

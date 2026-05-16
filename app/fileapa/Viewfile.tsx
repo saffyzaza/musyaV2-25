@@ -282,7 +282,7 @@ export default function Viewfile({ entry, isFullscreen, onToggleFullscreen }: Vi
 						{isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
 					</button>
 					<a
-						href={entry.objectUrl}
+						href={`${entry.objectUrl}?download=1`}
 						download={entry.name}
 						className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-1.5 text-sm font-medium text-gray-700 transition hover:bg-[#ffece5]"
 					>
@@ -301,7 +301,28 @@ export default function Viewfile({ entry, isFullscreen, onToggleFullscreen }: Vi
 							{error}
 						</div>
 					) : preview?.kind === 'pdf' ? (
-						<iframe title={entry.name} src={entry.objectUrl} className="min-h-[52vh] w-full flex-1" />
+						<object data={entry.objectUrl} type="application/pdf" className="min-h-[52vh] w-full flex-1">
+							<div className="flex h-full min-h-[52vh] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-gray-600">
+								<p>เบราว์เซอร์นี้ไม่สามารถแสดง PDF ในหน้าได้</p>
+								<div className="flex flex-wrap justify-center gap-2">
+									<a
+										href={entry.objectUrl}
+										target="_blank"
+										rel="noreferrer"
+										className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 transition hover:bg-[#fff3ee]"
+									>
+										เปิด PDF
+									</a>
+									<a
+										href={`${entry.objectUrl}?download=1`}
+										download={entry.name}
+										className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-700 transition hover:bg-[#fff3ee]"
+									>
+										ดาวน์โหลด PDF
+									</a>
+								</div>
+							</div>
+						</object>
 					) : preview?.kind === 'table' ? (
 						<>
 							<div className="border-b border-gray-200 bg-[#f7f4f3f1] px-4 py-3 text-sm font-medium text-gray-700">
