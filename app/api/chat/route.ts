@@ -185,61 +185,39 @@ function fetchFilteredRows(
   return { filteredHeaders, filteredRows, matchedCount: matched.length };
 }
 
-// ─── File domain analysis (LLM-based) ────────────────────────────────────────
+// ─── Filename relevance scoring ───────────────────────────────────────────────
 
-type FileDomainResult = {
-  file_domains: Record<string, string>; // fileId → domain label
-  relevant_file_ids: string[];
-  reasoning: string;
-};
+// Thai keyword → English synonyms likely to appear in filenames
+const SEMANTIC_MAP: [string, string[]][] = [
+  ["ฆ่าตัวตาย", ["suicide", "suicid", "self-harm"]],
+  ["อุบัติเหตุ", ["accident", "road", "crash", "injury"]],
+  ["มะเร็ง", ["cancer", "tumor"]],
+  ["โรคติดต่อ", ["infectious", "communicable", "disease"]],
+  ["เบาหวาน", ["diabetes"]],
+  ["ความดัน", ["hypertension", "blood_pressure"]],
+  ["หัวใจ", ["heart", "cardiac", "cardiovascular"]],
+  ["ปอด", ["lung", "pulmonary", "respiratory"]],
+  ["ไต", ["kidney", "renal"]],
+  ["สุขภาพ", ["health", "medical"]],
+  ["มุกดาหาร", ["mukdahan"]],
+  ["อุบล", ["ubon"]],
+  ["เชียงใหม่", ["chiangmai", "chiang_mai"]],
+  ["กรุงเทพ", ["bangkok"]],
+  ["ระยอง", ["rayong"]],
+  ["ภูเก็ต", ["phuket"]],
+];
 
-async function analyzeFileDomains(
-  files: StoredFile[],
-  query: string,
-): Promise<FileDomainResult> {
-  if (files.length === 0) return { file_domains: {}, relevant_file_ids: [], reasoning: "ไม่มีไฟล์" };
+function scoreFileRelevance(file: StoredFile, queryKeywords: string[], query: string): number {
+  const text = (file.name + " " + (file.path ?? "")).toLowerCase();
+  const queryLower = query.toLowerCase();
 
-  const fileList = files
-    .map((f) => `- ID: ${f.id} | path: ${f.path ?? f.name}`)
-    .join("\n");
-
-  try {
-    const raw = await callLLM(
-      [
-        {
-          role: "system",
-          content: "คุณเป็น AI วิเคราะห์ domain ของไฟล์ข้อมูลจากชื่อโฟลเดอร์และชื่อไฟล์ ตอบ JSON เท่านั้น ห้ามมีข้อความอื่น",
-        },
-        {
-          role: "user",
-          content: `รายการไฟล์ CSV ในระบบ:
-${fileList}
-
-คำถามของผู้ใช้: "${query}"
-
-วิเคราะห์ domain ของแต่ละไฟล์จากชื่อโฟลเดอร์และชื่อไฟล์ แล้วเลือกเฉพาะไฟล์ที่เกี่ยวข้องกับคำถาม ตอบ JSON:
-{
-  "file_domains": {
-    "ID_ไฟล์": "domain ของไฟล์นี้ เช่น 'ข้อมูลการฆ่าตัวตาย', 'อุบัติเหตุทางถนน', 'โรคมะเร็ง'"
-  },
-  "relevant_file_ids": ["ID ของไฟล์ที่เกี่ยวข้องกับคำถามเท่านั้น ถ้าไม่มีให้ส่ง []"],
-  "reasoning": "เหตุผลสั้นๆ ว่า domain ของแต่ละไฟล์คืออะไร และเลือกไฟล์ไหนเพราะอะไร"
-}`,
-        },
-      ],
-      0.1,
-    );
-
-    const parsed = parseJson<FileDomainResult>(raw);
-    return {
-      file_domains: parsed.file_domains ?? {},
-      relevant_file_ids: Array.isArray(parsed.relevant_file_ids) ? parsed.relevant_file_ids : [],
-      reasoning: parsed.reasoning ?? "",
-    };
-  } catch {
-    // Fallback: no files selected
-    return { file_domains: {}, relevant_file_ids: [], reasoning: "วิเคราะห์ไม่สำเร็จ" };
+  // Expand Thai terms to English equivalents
+  const expandedTerms = [...queryKeywords];
+  for (const [thai, english] of SEMANTIC_MAP) {
+    if (queryLower.includes(thai)) expandedTerms.push(...english);
   }
+
+  return expandedTerms.reduce((score, term) => score + (text.includes(term.toLowerCase()) ? 1 : 0), 0);
 }
 
 // ─── Main CSV Finder ──────────────────────────────────────────────────────────
@@ -252,7 +230,6 @@ async function findCsvFiles(query: string): Promise<{
   let findError = "";
   const allReasonings: string[] = [];
   const toolDetails: string[] = [];
-  let domainAnalysis: FileDomainResult = { file_domains: {}, relevant_file_ids: [], reasoning: "" };
 
   try {
     const listRes = await fetch(`${APP_URL}/api/files`);
@@ -264,15 +241,23 @@ async function findCsvFiles(query: string): Promise<{
         (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
       );
 
-      // AI analyzes domain of each file from folder+filename, then picks relevant ones
-      domainAnalysis = await analyzeFileDomains(allCsvFiles, query);
+      // Score each CSV by filename relevance to the query
+      const keywords = query
+        .replace(/[()[\]{}'"""'']/g, " ")
+        .split(/[\s,]+/)
+        .map((w) => w.trim())
+        .filter((w) => w.length >= 2);
 
-      const csvFiles = allCsvFiles
-        .filter((f) => domainAnalysis.relevant_file_ids.includes(f.id))
-        .slice(0, 2);
+      const scored = allCsvFiles
+        .map((f) => ({ file: f, score: scoreFileRelevance(f, keywords, query) }))
+        .sort((a, b) => b.score - a.score);
+
+      // Only pick files with score > 0; if none match, pick nothing (no irrelevant CSV)
+      const relevant = scored.filter((s) => s.score > 0).slice(0, 2);
+      const csvFiles = relevant.length > 0 ? relevant.map((s) => s.file) : [];
 
       console.log(
-        `[CSV Finder] domains: ${JSON.stringify(domainAnalysis.file_domains)} → selected: ${csvFiles.map((f) => f.name).join(", ") || "none"}`,
+        `[CSV Finder] scored: ${scored.map((s) => `${s.file.name}(${s.score})`).join(", ")} → selected: ${csvFiles.map((f) => f.name).join(", ") || "none"}`,
       );
 
       for (const file of csvFiles) {
@@ -317,31 +302,25 @@ async function findCsvFiles(query: string): Promise<{
     findError = "เกิดข้อผิดพลาดในการค้นหาไฟล์";
   }
 
-  // Build domain summary for display
-  const domainLines = Object.entries(domainAnalysis.file_domains)
-    .map(([id, domain]) => {
-      const f = files.find((x) => x.id === id) ?? { name: id };
-      return `• ${f.name}: ${domain}`;
-    })
-    .join("\n");
-
   const csvFinderStep: AgentStep = {
     agentName: "CSV Finder",
     agentRole: "ค้นหาและโหลดไฟล์ข้อมูล",
     thinking:
       files.length > 0
-        ? `① AI วิเคราะห์ domain จากชื่อโฟลเดอร์/ไฟล์ทุกไฟล์\n${domainLines}\n\n② เลือกเฉพาะไฟล์ที่ตรงกับคำถาม: ${files.map((f) => f.name).join(", ")}\n③ สแกน headers → AI เลือกคอลัมน์ → กรองแถว`
-        : `① AI วิเคราะห์ domain ของไฟล์ทั้งหมด\n${domainLines || "ไม่พบไฟล์ CSV"}\n\n② ${findError || "ไม่มีไฟล์ที่เกี่ยวข้องกับคำถามนี้"}`,
+        ? `① สแกน headers ของ ${files.length} ไฟล์ CSV\n② AI ดูคอลัมน์แล้วตัดสินใจ: ${allReasonings.join(" | ")}\n③ กรองแถวและเลือกเฉพาะคอลัมน์ที่เกี่ยวข้อง`
+        : findError || "ไม่พบไฟล์ CSV ในระบบ",
     tool: {
       name: "analyze_and_fetch",
-      displayName: "AI วิเคราะห์ domain → เลือกไฟล์ → ดึงข้อมูล",
-      input: `วิเคราะห์ domain จาก path+filename:\n${domainLines || "ไม่พบไฟล์ CSV"}\n\nเหตุผล: ${domainAnalysis.reasoning}`,
-      output: files.length > 0 ? toolDetails.join("\n") : "ไม่มีไฟล์ที่เกี่ยวข้อง",
+      displayName: "AI วิเคราะห์ columns → ดึงข้อมูลเฉพาะส่วน",
+      input: files.length > 0
+        ? `Headers ที่สแกนพบ: ${files.map((f, i) => `[${toolDetails[i]?.split(":")[0]}] ${f.headers.join(", ")}`).join(" | ")}`
+        : "ค้นหาไฟล์ CSV ใน MinIO",
+      output: files.length > 0 ? toolDetails.join("\n") : "ไม่พบไฟล์ CSV",
     },
     result:
       files.length > 0
         ? `ได้ข้อมูลจาก ${files.length} ไฟล์ — ส่งให้ Orchestrator วิเคราะห์`
-        : "ไม่มีไฟล์ CSV ที่เกี่ยวข้อง ใช้ความรู้ทั่วไปแทน",
+        : "ไม่พบไฟล์ CSV ใช้ความรู้ทั่วไปแทน",
     status: "done",
   };
 
