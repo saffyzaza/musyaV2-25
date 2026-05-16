@@ -3,7 +3,7 @@ import { useSyncExternalStore, useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import clsx from "clsx";
 import { HiOutlineSparkles, HiOutlineLightBulb } from "react-icons/hi";
-import { FiSearch, FiCpu, FiTool, FiChevronDown, FiChevronRight, FiDatabase } from "react-icons/fi";
+import { FiSearch, FiCpu, FiTool, FiChevronDown, FiChevronRight, FiDatabase, FiCode } from "react-icons/fi";
 
 import type { ChatSessionState, AgentStep } from "./chatTypes";
 import { createEmptyChatSessionState, getChatSessionState, subscribeToChatSession } from "./chatSessionStore";
@@ -16,6 +16,7 @@ const PREVIEW_SESSION: ChatSessionState = createEmptyChatSessionState("preview-s
 const PIPELINE_AGENTS = [
   { name: "CSV Finder", role: "ค้นหาและโหลดไฟล์ข้อมูล" },
   { name: "Orchestrator", role: "วิเคราะห์และประสานงาน" },
+  { name: "Code Agent", role: "เขียนและรัน Python Code" },
   { name: "Research Agent", role: "ค้นหาและวิเคราะห์ข้อมูล" },
   { name: "Synthesizer", role: "สรุปและจัดรูปแบบคำตอบ" },
 ] as const;
@@ -23,10 +24,11 @@ const PIPELINE_AGENTS = [
 type AgentCfg = { color: string; bg: string; border: string; dot: string; letter: string };
 
 const AGENT_CONFIG: Record<string, AgentCfg> = {
-  "CSV Finder": { color: "text-orange-700", bg: "bg-orange-50", border: "border-orange-200", dot: "bg-orange-500", letter: "F" },
-  Orchestrator: { color: "text-violet-700", bg: "bg-violet-50", border: "border-violet-200", dot: "bg-violet-500", letter: "O" },
-  "Research Agent": { color: "text-blue-700", bg: "bg-blue-50", border: "border-blue-200", dot: "bg-blue-500", letter: "R" },
-  Synthesizer: { color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", letter: "S" },
+  "CSV Finder":   { color: "text-orange-700",  bg: "bg-orange-50",  border: "border-orange-200",  dot: "bg-orange-500",  letter: "F" },
+  Orchestrator:   { color: "text-violet-700",  bg: "bg-violet-50",  border: "border-violet-200",  dot: "bg-violet-500",  letter: "O" },
+  "Code Agent":   { color: "text-green-700",   bg: "bg-green-50",   border: "border-green-200",   dot: "bg-green-600",   letter: "C" },
+  "Research Agent": { color: "text-blue-700",  bg: "bg-blue-50",    border: "border-blue-200",    dot: "bg-blue-500",    letter: "R" },
+  Synthesizer:    { color: "text-emerald-700", bg: "bg-emerald-50", border: "border-emerald-200", dot: "bg-emerald-500", letter: "S" },
 };
 
 const DEFAULT_CFG: AgentCfg = { color: "text-gray-700", bg: "bg-gray-50", border: "border-gray-200", dot: "bg-gray-400", letter: "?" };
@@ -41,11 +43,13 @@ const TOOL_ICONS: Record<string, string> = {
   list_files: "📁",
   read_csv: "📋",
   analyze_and_fetch: "🧠",
+  code_execution: "🐍",
 };
 
 function AgentIcon({ name }: { name: string }) {
   if (name === "CSV Finder") return <FiDatabase size={9} />;
   if (name === "Orchestrator") return <HiOutlineLightBulb size={10} />;
+  if (name === "Code Agent") return <FiCode size={9} />;
   if (name === "Research Agent") return <FiSearch size={9} />;
   if (name === "Synthesizer") return <HiOutlineSparkles size={10} />;
   return <FiCpu size={9} />;

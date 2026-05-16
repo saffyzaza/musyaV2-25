@@ -294,31 +294,22 @@ function formatCsvContext(files: CsvFileData[]): string {
 function buildSystemPrompt(csvContext: string): string {
   const hasCsv = csvContext.length > 0;
 
-  const researcherToolInput = hasCsv
-    ? `Python pandas code ที่ใช้ดึงข้อมูลตามคำถาม เช่น:
-\`\`\`python
-import pandas as pd
-
-df = pd.read_csv('ชื่อไฟล์.csv')
-result = df[(df['province'] == 'ค่าจังหวัด') & (df['year'].between(2022, 2025))]
-print(result.groupby(['year'])[['คอลัมน์ที่สนใจ']].sum().to_string())
-\`\`\`
-(เขียน code จริงตามคอลัมน์และข้อมูลที่ได้รับ)`
-    : "คำค้นหาหรือหัวข้อที่ต้องการความรู้";
-
   return `คุณคือระบบ Multi-Agent AI ช่วยงานด้านสุขภาพและข้อมูลสาธารณสุข${csvContext}
 
 ตอบในรูปแบบ JSON เท่านั้น ห้ามมีข้อความนอก JSON:
 {
-  "orchestrator_thinking": "วิเคราะห์คำถาม${hasCsv ? "และข้อมูล CSV ที่ CSV Finder เลือกมาให้ ระบุชื่อคอลัมน์จริงที่เห็น" : ""}",
-  "orchestrator_delegation": "มอบหมายให้ Research Agent วิเคราะห์",
-  "researcher_thinking": "${hasCsv ? "วิเคราะห์โครงสร้าง CSV และเขียน pandas code เพื่อดึงข้อมูลตามที่ต้องการ" : "ค้นหาข้อมูลที่เกี่ยวข้อง"}",
+  "orchestrator_thinking": "วิเคราะห์คำถาม${hasCsv ? "และโครงสร้าง CSV ที่ CSV Finder ส่งมา ระบุชื่อคอลัมน์จริง" : ""}",
+  "orchestrator_delegation": "มอบหมายให้ Code Agent เขียน code และ Research Agent วิเคราะห์",
+  "code_agent_thinking": "${hasCsv ? "ดูคอลัมน์จริงจาก CSV แล้วออกแบบ pandas query ที่ตรงกับคำถาม" : "ออกแบบ code สำหรับวิเคราะห์ข้อมูล"}",
+  "code_agent_code": "${hasCsv ? "```python\\nimport pandas as pd\\n\\ndf = pd.read_csv(\\'ชื่อไฟล์จริง.csv\\')\\n# เขียน filter และ groupby ตามคอลัมน์จริงที่เห็น\\nresult = df[(df[\\'ชื่อคอลัมน์จังหวัด\\'] == \\'ค่าจังหวัด\\') & (df[\\'ชื่อคอลัมน์ปี\\'].between(2022, 2025))]\\nprint(result.groupby([\\'ปี\\'])[[\\'คอลัมน์ตัวเลข\\']].sum().to_string())\\n```" : "```python\\nimport pandas as pd\\n# code สำหรับวิเคราะห์ข้อมูล\\n```"}",
+  "code_agent_result": "${hasCsv ? "อธิบายผลที่ได้จาก code เช่น จำนวนแถวที่พบ ค่าสำคัญ ข้อมูลสรุป" : "ผลลัพธ์จาก code"}",
+  "researcher_thinking": "${hasCsv ? "ตีความผลจาก Code Agent และเพิ่มบริบทเชิงสุขภาพ" : "ค้นหาข้อมูลเพิ่มเติม"}",
   "researcher_tool": "${hasCsv ? "data_analysis" : "knowledge_search"}",
-  "researcher_tool_input": "${researcherToolInput.replace(/\n/g, "\\n").replace(/"/g, '\\"')}",
-  "researcher_findings": "${hasCsv ? "สรุปผลที่ได้จาก code เช่น 'พบข้อมูล X แถว ปี 2022: N ราย ปี 2023: M ราย...'" : "สรุปข้อมูลที่ค้นพบ"}",
-  "synthesizer_thinking": "รวบรวมและสรุปเป็นคำตอบ",
+  "researcher_tool_input": "${hasCsv ? "สรุปผลจาก code ที่ Code Agent รัน" : "คำค้นหา"}",
+  "researcher_findings": "สรุปข้อค้นพบและข้อมูลเชิงลึก",
+  "synthesizer_thinking": "รวบรวมข้อมูลจากทุก agent และสรุป",
   "synthesizer_summary": "สรุป 1 ประโยค",
-  "finalAnswer": "คำตอบฉบับสมบูรณ์ใน Markdown${hasCsv ? " อ้างอิงตัวเลขจริงจากข้อมูล CSV ถ้ามีตัวเลขหลายปีให้แสดงเป็นตาราง markdown" : " ถ้ามีตัวเลขให้แสดงเป็นตาราง"}"
+  "finalAnswer": "คำตอบฉบับสมบูรณ์ใน Markdown${hasCsv ? " อ้างอิงตัวเลขจริงจาก CSV ถ้ามีตัวเลขหลายปี/หลายจังหวัดให้แสดงเป็นตาราง markdown" : " ถ้ามีตัวเลขให้แสดงเป็นตาราง"}"
 }
 
 researcher_tool ต้องเป็นหนึ่งใน: knowledge_search, data_analysis, clinical_guidelines, statistics_tool, nutrition_database, disease_surveillance
@@ -337,6 +328,7 @@ function formatHistory(history: ChatRouteRequest["history"]) {
 type ParsedAgentResult = {
   message: string;
   orchestratorStep: AgentStep;
+  codeAgentStep: AgentStep;
   researchStep: AgentStep;
   synthesizerStep: AgentStep;
 };
@@ -344,10 +336,16 @@ type ParsedAgentResult = {
 function parseMultiAgentResponse(content: string, hasCsv: boolean): ParsedAgentResult {
   const fallback = (msg: string): ParsedAgentResult => ({
     message: msg,
-    orchestratorStep: { agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน", thinking: "วิเคราะห์คำถาม", result: "มอบหมายให้ Research Agent" },
+    orchestratorStep: { agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน", thinking: "วิเคราะห์คำถาม", result: "มอบหมายให้ Code Agent และ Research Agent" },
+    codeAgentStep: {
+      agentName: "Code Agent", agentRole: "เขียนและรัน Python Code",
+      thinking: "ออกแบบ pandas query",
+      tool: { name: "code_execution", displayName: "Python pandas", input: "```python\nimport pandas as pd\n# วิเคราะห์ข้อมูล\n```", output: "รอผล" },
+      result: "เขียน code เรียบร้อย",
+    },
     researchStep: {
       agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
-      thinking: hasCsv ? "วิเคราะห์ข้อมูล CSV" : "ค้นหาข้อมูล",
+      thinking: hasCsv ? "วิเคราะห์ผลจาก Code Agent" : "ค้นหาข้อมูล",
       tool: { name: hasCsv ? "data_analysis" : "knowledge_search", displayName: hasCsv ? "วิเคราะห์ข้อมูล CSV" : "ค้นหาความรู้", input: "คำถามของผู้ใช้", output: msg.slice(0, 120) },
       result: "รวบรวมข้อมูลเรียบร้อย",
     },
@@ -357,9 +355,27 @@ function parseMultiAgentResponse(content: string, hasCsv: boolean): ParsedAgentR
   try {
     const p = parseJson<Record<string, string>>(content);
     if (!p.finalAnswer) return fallback(content);
+
+    // Code agent — render code block directly; unescape \n in the code string
+    const rawCode = (p.code_agent_code || "```python\n# ไม่มี code\n```").replace(/\\n/g, "\n");
+
     return {
       message: p.finalAnswer,
-      orchestratorStep: { agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน", thinking: p.orchestrator_thinking || "", result: p.orchestrator_delegation || "" },
+      orchestratorStep: {
+        agentName: "Orchestrator", agentRole: "วิเคราะห์และประสานงาน",
+        thinking: p.orchestrator_thinking || "", result: p.orchestrator_delegation || "",
+      },
+      codeAgentStep: {
+        agentName: "Code Agent", agentRole: "เขียนและรัน Python Code",
+        thinking: p.code_agent_thinking || "",
+        tool: {
+          name: "code_execution",
+          displayName: "Python pandas",
+          input: rawCode,
+          output: p.code_agent_result || "",
+        },
+        result: p.code_agent_result || "",
+      },
       researchStep: {
         agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล",
         thinking: p.researcher_thinking || "",
@@ -368,7 +384,10 @@ function parseMultiAgentResponse(content: string, hasCsv: boolean): ParsedAgentR
           : null,
         result: p.researcher_findings || "",
       },
-      synthesizerStep: { agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ", thinking: p.synthesizer_thinking || "", result: p.synthesizer_summary || "" },
+      synthesizerStep: {
+        agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ",
+        thinking: p.synthesizer_thinking || "", result: p.synthesizer_summary || "",
+      },
     };
   } catch {
     return fallback(content);
@@ -421,31 +440,38 @@ export async function POST(request: Request) {
           { role: "user", content: fullPrompt },
         ]);
 
-        const { message, orchestratorStep, researchStep, synthesizerStep } =
+        const { message, orchestratorStep, codeAgentStep, researchStep, synthesizerStep } =
           parseMultiAgentResponse(raw, csvFiles.length > 0);
 
         send({ type: "agent_done", step: { ...orchestratorStep, status: "done" } });
         await sleep(300);
 
-        // 4. Research Agent
+        // 4. Code Agent
+        send({ type: "agent_start", agentName: "Code Agent", agentRole: "เขียนและรัน Python Code" });
+        await sleep(1000);
+        send({ type: "agent_done", step: { ...codeAgentStep, status: "done" } });
+        await sleep(300);
+
+        // 5. Research Agent
         send({ type: "agent_start", agentName: "Research Agent", agentRole: "ค้นหาและวิเคราะห์ข้อมูล" });
-        await sleep(900);
+        await sleep(800);
         send({ type: "agent_done", step: { ...researchStep, status: "done" } });
         await sleep(300);
 
-        // 5. Synthesizer
+        // 6. Synthesizer
         send({ type: "agent_start", agentName: "Synthesizer", agentRole: "สรุปและจัดรูปแบบคำตอบ" });
         await sleep(700);
         send({ type: "agent_done", step: { ...synthesizerStep, status: "done" } });
         await sleep(200);
 
-        // 6. Final
+        // 7. Final
         send({
           type: "final",
           message,
           agentSteps: [
             { ...csvFinderStep, status: "done" },
             { ...orchestratorStep, status: "done" },
+            { ...codeAgentStep, status: "done" },
             { ...researchStep, status: "done" },
             { ...synthesizerStep, status: "done" },
           ],
