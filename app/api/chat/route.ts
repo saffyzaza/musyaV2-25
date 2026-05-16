@@ -185,41 +185,6 @@ function fetchFilteredRows(
   return { filteredHeaders, filteredRows, matchedCount: matched.length };
 }
 
-// ─── Filename relevance scoring ───────────────────────────────────────────────
-
-// Thai keyword → English synonyms likely to appear in filenames
-const SEMANTIC_MAP: [string, string[]][] = [
-  ["ฆ่าตัวตาย", ["suicide", "suicid", "self-harm"]],
-  ["อุบัติเหตุ", ["accident", "road", "crash", "injury"]],
-  ["มะเร็ง", ["cancer", "tumor"]],
-  ["โรคติดต่อ", ["infectious", "communicable", "disease"]],
-  ["เบาหวาน", ["diabetes"]],
-  ["ความดัน", ["hypertension", "blood_pressure"]],
-  ["หัวใจ", ["heart", "cardiac", "cardiovascular"]],
-  ["ปอด", ["lung", "pulmonary", "respiratory"]],
-  ["ไต", ["kidney", "renal"]],
-  ["สุขภาพ", ["health", "medical"]],
-  ["มุกดาหาร", ["mukdahan"]],
-  ["อุบล", ["ubon"]],
-  ["เชียงใหม่", ["chiangmai", "chiang_mai"]],
-  ["กรุงเทพ", ["bangkok"]],
-  ["ระยอง", ["rayong"]],
-  ["ภูเก็ต", ["phuket"]],
-];
-
-function scoreFileRelevance(file: StoredFile, queryKeywords: string[], query: string): number {
-  const text = (file.name + " " + (file.path ?? "")).toLowerCase();
-  const queryLower = query.toLowerCase();
-
-  // Expand Thai terms to English equivalents
-  const expandedTerms = [...queryKeywords];
-  for (const [thai, english] of SEMANTIC_MAP) {
-    if (queryLower.includes(thai)) expandedTerms.push(...english);
-  }
-
-  return expandedTerms.reduce((score, term) => score + (text.includes(term.toLowerCase()) ? 1 : 0), 0);
-}
-
 // ─── Main CSV Finder ──────────────────────────────────────────────────────────
 
 async function findCsvFiles(query: string): Promise<{
@@ -237,30 +202,11 @@ async function findCsvFiles(query: string): Promise<{
       findError = "ไม่สามารถเชื่อมต่อ API ไฟล์";
     } else {
       const allFiles = (await listRes.json()) as StoredFile[];
-      const allCsvFiles = allFiles.filter(
+      const csvFiles = allFiles.filter(
         (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
       );
 
-      // Score each CSV by filename relevance to the query
-      const keywords = query
-        .replace(/[()[\]{}'"""'']/g, " ")
-        .split(/[\s,]+/)
-        .map((w) => w.trim())
-        .filter((w) => w.length >= 2);
-
-      const scored = allCsvFiles
-        .map((f) => ({ file: f, score: scoreFileRelevance(f, keywords, query) }))
-        .sort((a, b) => b.score - a.score);
-
-      // Only pick files with score > 0; if none match, pick nothing (no irrelevant CSV)
-      const relevant = scored.filter((s) => s.score > 0).slice(0, 2);
-      const csvFiles = relevant.length > 0 ? relevant.map((s) => s.file) : [];
-
-      console.log(
-        `[CSV Finder] scored: ${scored.map((s) => `${s.file.name}(${s.score})`).join(", ")} → selected: ${csvFiles.map((f) => f.name).join(", ") || "none"}`,
-      );
-
-      for (const file of csvFiles) {
+      for (const file of csvFiles.slice(0, 3)) {
         try {
           // Step 1: scan headers
           const { headers, allLines } = await scanCsvHeaders(file.id);
