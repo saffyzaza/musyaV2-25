@@ -99,6 +99,22 @@ function pathMatches(fullPath: string, term: string): boolean {
   return false;
 }
 
+// ─── Detect "all provinces" / merged files ───────────────────────────────────
+
+function isAllProvincesFile(fullPath: string): boolean {
+  const p = norm(fullPath);
+  return (
+    p.includes("ทุกจังหวัด") ||
+    p.includes("all_province") ||
+    p.includes("all_provinces") ||
+    p.includes("all-province") ||
+    p.includes("merged") ||
+    p.includes("5_province") ||
+    p.includes("รวมทุก") ||
+    p.includes("ทุกพื้นที่")
+  );
+}
+
 // ─── Tool definition ──────────────────────────────────────────────────────────
 
 const fileFinder: ExecutableTool = {
@@ -129,18 +145,25 @@ const fileFinder: ExecutableTool = {
     const scored = csvFiles.map((f) => {
       const fullPath = `${f.path ?? ""}/${f.name}`;
 
-      // Base terms: domain + province + disease — all must match
-      const baseMatch = baseTerms.every((t) => pathMatches(fullPath, t));
-      if (!baseMatch) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
+      // Domain + disease: mandatory match
+      const mandatoryTerms = [domain, disease].filter(Boolean);
+      const mandatoryMatch = mandatoryTerms.every((t) => pathMatches(fullPath, t));
+      if (!mandatoryMatch) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
 
-      // Year matching: exact OR within a file's year range (e.g. "2022_2025" covers 2024)
-      const yearExact = yearTerms.length === 0 || yearTerms.some((y) => pathMatches(fullPath, y));
+      // Province: exact match (best) OR "all provinces" merged file (ok) OR fail
+      const provinceMatch = !province || pathMatches(fullPath, province);
+      const allProvinces  = !provinceMatch && isAllProvincesFile(fullPath);
+      if (!provinceMatch && !allProvinces) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
+
+      // Year matching: exact OR within filename range
+      const yearExact  = yearTerms.length === 0 || yearTerms.some((y) => pathMatches(fullPath, y));
       const rangeMatch = yearTerms.length > 0 && yearTerms.some((y) => yearInFileRange(fullPath, y));
-      const yearMatch = yearExact || rangeMatch;
+      const yearMatch  = yearExact || rangeMatch;
 
       const score =
-        baseTerms.filter((t) => pathMatches(fullPath, t)).length +
-        (yearExact ? 2 : rangeMatch ? 1 : 0);
+        mandatoryTerms.filter((t) => pathMatches(fullPath, t)).length +
+        (provinceMatch ? 2 : allProvinces ? 1 : 0) +   // province weight
+        (yearExact ? 2 : rangeMatch ? 1 : 0);           // year weight
 
       return { f, fullPath, score, yearMatch, rangeMatch };
     });

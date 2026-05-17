@@ -38,32 +38,56 @@ function buildYearFilter(filter_years: string): ((row: string) => boolean) | nul
   return unique.length > 0 ? (row) => unique.some((y) => row.includes(y)) : null;
 }
 
-// Smart filter with fallback:
-// 1. Try year+keyword → 2. Try year only → 3. Try keyword only → 4. All rows
+// Province/keyword synonym expansion for row filtering
+const KW_SYNONYMS: Record<string, string[]> = {
+  มุกดาหาร: ["mukdahan"],
+  อุบลราชธานี: ["ubon", "อุบล"],
+  อุบล: ["อุบลราชธานี", "ubon"],
+  ศรีสะเกษ: ["sisaket"],
+  อำนาจเจริญ: ["amnat"],
+  ยโสธร: ["yasothon"],
+  นครพนม: ["nakhon_phanom", "nakhonphanom"],
+  สกลนคร: ["sakon_nakhon"],
+  "ฆ่าตัวตาย": ["suicide", "suicid"],
+  "พยายามฆ่าตัวตาย": ["attempt", "suicide_attempt"],
+};
+
+function buildKwMatcher(kw: string): (row: string) => boolean {
+  if (!kw) return () => true;
+  const variants = [kw.toLowerCase(), ...(KW_SYNONYMS[kw] ?? []).map((s) => s.toLowerCase())];
+  return (row) => {
+    const r = row.toLowerCase();
+    return variants.some((v) => r.includes(v));
+  };
+}
+
+// Smart filter: 4-level fallback with synonym expansion
 function smartFilter(
   rows: string[],
   yearFilter: ((r: string) => boolean) | null,
   kwLower: string,
 ): { filtered: string[]; note: string } {
-  // Try year + keyword
+  const kwMatch = buildKwMatcher(kwLower);
+
+  // 1. year + keyword (with synonyms)
   if (yearFilter && kwLower) {
-    const r = rows.filter((row) => yearFilter(row) && row.toLowerCase().includes(kwLower));
+    const r = rows.filter((row) => yearFilter(row) && kwMatch(row));
     if (r.length > 0) return { filtered: r, note: "filter: year + keyword" };
   }
-  // Try year only
+  // 2. year only
   if (yearFilter) {
     const r = rows.filter(yearFilter);
-    if (r.length > 0) return { filtered: r, note: "filter: year เท่านั้น (ไม่พบ keyword ในแถว — ไฟล์อาจเป็นข้อมูลเฉพาะจังหวัดแล้ว)" };
+    if (r.length > 0) return { filtered: r, note: "filter: year เท่านั้น" };
   }
-  // Try keyword only
+  // 3. keyword only (with synonyms) — critical for merged multi-province files
   if (kwLower) {
-    const r = rows.filter((row) => row.toLowerCase().includes(kwLower));
-    if (r.length > 0) return { filtered: r, note: "filter: keyword เท่านั้น" };
+    const r = rows.filter(kwMatch);
+    if (r.length > 0) return { filtered: r, note: `filter: keyword "${kwLower}" เท่านั้น (ดึงแถวจังหวัดนั้น)` };
   }
-  // Fallback: all rows (file is already province/domain specific)
+  // 4. All rows fallback
   return {
     filtered: rows,
-    note: "แสดงทุกแถว (ไม่พบ filter ในเนื้อหาแถว — ไฟล์นี้เป็นข้อมูลเฉพาะของจังหวัด/ปีนั้นอยู่แล้ว)",
+    note: "แสดงทุกแถว (ไม่พบ filter ในเนื้อหาแถว — ไฟล์เฉพาะจังหวัด/ปีนั้นอยู่แล้ว)",
   };
 }
 
