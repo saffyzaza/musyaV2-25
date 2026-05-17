@@ -13,6 +13,7 @@ const d4Nutrition: Agent = {
     { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
     { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "multi_csv_reader", description: "อ่านหลายไฟล์ CSV พร้อมกัน สำหรับข้อมูลหลายปี (2565-2569)" },
+    { name: "ai_csv_analyzer",  description: "ส่ง CSV ทั้งไฟล์ให้ AI วิเคราะห์ ไม่จำกัดแถว เหมาะกับไฟล์ merged หลายจังหวัด" },
     { name: "nutrition_database",   description: "ฐานข้อมูลโภชนาการและสารอาหาร" },
     { name: "data_analysis",        description: "วิเคราะห์ข้อมูลสถานะโภชนาการประชากร" },
     { name: "statistics_tool",      description: "สถิติโภชนาการรายกลุ่มอายุ รายจังหวัด" },
