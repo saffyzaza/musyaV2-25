@@ -48,13 +48,23 @@ const KW_SYNONYMS: Record<string, string[]> = {
   ยโสธร: ["yasothon"],
   นครพนม: ["nakhon_phanom", "nakhonphanom"],
   สกลนคร: ["sakon_nakhon"],
+  ยโสธร: ["yasothon"],
+  "ร้อยเอ็ด": ["roi_et", "roiet"],
+  มุกดาหาร: ["mukdahan"],
+  "อุบลราชธานี": ["ubon", "อุบล"],
   "ฆ่าตัวตาย": ["suicide", "suicid"],
   "พยายามฆ่าตัวตาย": ["attempt", "suicide_attempt"],
 };
 
 function buildKwMatcher(kw: string): (row: string) => boolean {
-  if (!kw) return () => true;
-  const variants = [kw.toLowerCase(), ...(KW_SYNONYMS[kw] ?? []).map((s) => s.toLowerCase())];
+  if (!kw) return () => false; // empty → no keyword filter
+  // Support comma-separated keywords: "ยโสธร,อุบลราชธานี"
+  const keywords = kw.split(",").map((k) => k.trim()).filter(Boolean);
+  const variants = keywords.flatMap((k) => [
+    k.toLowerCase(),
+    ...(KW_SYNONYMS[k] ?? []).map((s) => s.toLowerCase()),
+    ...(KW_SYNONYMS[k.toLowerCase()] ?? []).map((s) => s.toLowerCase()),
+  ]);
   return (row) => {
     const r = row.toLowerCase();
     return variants.some((v) => r.includes(v));
@@ -84,10 +94,33 @@ function smartFilter(
     const r = rows.filter(kwMatch);
     if (r.length > 0) return { filtered: r, note: `filter: keyword "${kwLower}" เท่านั้น (ดึงแถวจังหวัดนั้น)` };
   }
-  // 4. All rows fallback
+  // 4. Year filter → sort: keyword-matching rows first (so target province appears early)
+  if (yearFilter) {
+    const yearRows = rows.filter(yearFilter);
+    if (yearRows.length > 0) {
+      const kwM = buildKwMatcher(kwLower);
+      const priority = yearRows.filter(kwM);
+      const rest = yearRows.filter((r) => !kwM(r));
+      return {
+        filtered: [...priority, ...rest],
+        note: `filter: year เท่านั้น, เรียงแถว "${kwLower}" ขึ้นก่อน (${priority.length} แถว province)`,
+      };
+    }
+  }
+  // 5. Keyword → sort by keyword match
+  if (kwLower) {
+    const kwM = buildKwMatcher(kwLower);
+    const priority = rows.filter(kwM);
+    const rest = rows.filter((r) => !kwM(r));
+    return {
+      filtered: [...priority, ...rest],
+      note: `filter: keyword "${kwLower}" (${priority.length} แถวตรง + ${rest.length} แถวอื่น)`,
+    };
+  }
+  // 6. All rows fallback
   return {
     filtered: rows,
-    note: "แสดงทุกแถว (ไม่พบ filter ในเนื้อหาแถว — ไฟล์เฉพาะจังหวัด/ปีนั้นอยู่แล้ว)",
+    note: "แสดงทุกแถว (ไม่พบ filter ในเนื้อหาแถว)",
   };
 }
 
@@ -144,13 +177,17 @@ const multiCsvReader: ExecutableTool = {
       const sourceName = meta?.name ?? `ID:${file_id}`;
       const fileUrl = `/api/files/${file_id}`;
 
+      // Show first column unique values to help LLM understand province/data format
+      const firstColValues = [...new Set(dataLines.map((l) => splitLine(l)[0]))].slice(0, 15);
+
       sections.push(
         `📄 ชื่อไฟล์: ${sourceName}\n` +
         `🔗 MARKDOWN_LINK (คัดลอกตรงนี้ลงในแหล่งที่มา): [${sourceName}](${fileUrl})\n` +
         `   คอลัมน์ (${headers.length}): ${headers.join(" | ")}\n` +
+        `   ค่าในคอลัมน์แรก (ตัวอย่าง): ${firstColValues.join(", ")}\n` +
         `   ${note} → ${filtered.length} แถว (จาก ${dataLines.length} ทั้งหมด)\n` +
         `   ${headers.join(",")}\n` +
-        filtered.slice(0, 30).map((r) => `   ${r}`).join("\n"),
+        filtered.slice(0, 150).map((r) => `   ${r}`).join("\n"),
       );
     }
 
