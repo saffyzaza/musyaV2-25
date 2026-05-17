@@ -70,48 +70,49 @@ const findAndAnalyze: ExecutableTool = {
       return { success: false, data: `เกิดข้อผิดพลาดขณะอ่านไฟล์ ${chosenId}` };
     }
 
+    // Strip BOM that confuses parsing
+    if (csvText.charCodeAt(0) === 0xfeff) csvText = csvText.slice(1);
+
     const totalRows = csvText.split(/\r?\n/).filter((l) => l.trim()).length - 1;
     const fileUrl = `/api/files/${chosenId}`;
     const displayName = chosenFile?.name ?? chosenId;
 
-    // ④ AI analyzes the ENTIRE file — STRICT anti-hallucination prompt
+    // ④ AI analyzes the ENTIRE file — balanced prompt
     const analysis = await callAI(
       [
-        "คุณเป็น AI อ่านข้อมูลจาก CSV ที่ให้มา ไม่ใช่ generator ของตัวเลข",
+        "คุณเป็น AI อ่านข้อมูลจาก CSV และจัดเป็น Markdown table",
         "",
-        "กฎเหล็ก (ผิดกฎ = ตอบผิด):",
-        "1. ใช้เฉพาะตัวเลขที่ปรากฏใน CSV ที่ให้ในข้อความนี้เท่านั้น",
-        "2. ห้ามใช้ความรู้นอกจาก CSV นี้ ห้ามคาดเดา ห้าม interpolate",
-        "3. แสดงข้อมูลใน Markdown table ที่มี **ทุกคอลัมน์จาก CSV** (เก็บชื่อคอลัมน์เดิม รวมตัวเลขในวงเล็บ เช่น Prevalence Rate (2))",
-        "4. ห้ามตัดคอลัมน์ออก ห้ามรวมหลายคอลัมน์เข้าด้วยกัน",
-        "5. ถ้าไม่มีข้อมูลใน CSV → ตอบ 'ไม่มีในไฟล์' อย่าประดิษฐ์",
-        "6. ค่าคอลัมน์ตามที่เห็นจริง อย่าเปลี่ยน format (2 ≠ 2%, อย่าใส่ % เพิ่ม)",
-        "7. SUM ที่ทำได้คือบวกเลขจากแถวจริงที่ปรากฏใน CSV เท่านั้น",
+        "หลักการ:",
+        "1. หาแถวที่ตรงกับ query โดยดู Year/Province/หัวข้อ จากคอลัมน์ใน CSV",
+        "2. ถ้าเจอแถว → ใส่ทุก cell value ในแถวนั้น ๆ ลงในตาราง verbatim (ห้ามใส่ 'ไม่พบ' ถ้าเจอแถว)",
+        "3. ถ้าค่าใน cell เป็น '' หรือ blank จริง ๆ → ใส่ '-'",
+        "4. ถ้าไม่เจอแถวที่ตรง → บอกตรง ๆ ว่าไฟล์มีปี/จังหวัดอะไรบ้าง (อย่ามั่ว)",
+        "5. ห้ามแต่งตัวเลขใหม่ ห้าม interpolate ห้ามเปลี่ยน format",
+        "   (ถ้า CSV เป็น 2 → ใส่ '2' ไม่ใช่ '2%')",
+        "6. แสดงตาราง Markdown แบบมี **ทุกคอลัมน์** จาก CSV เป็น header (รวมเลขในวงเล็บ)",
+        "7. ห้ามทำตารางสั้นแบบ key-value (รายการ | ค่า)",
       ].join("\n"),
       [
-        `=== CSV ข้อมูลดิบ (ใช้เฉพาะข้อมูลนี้) ===`,
-        `ไฟล์: ${displayName}`,
-        `จำนวนแถวข้อมูล: ${totalRows}`,
+        `=== CSV ข้อมูลดิบ ===`,
+        `ไฟล์: ${displayName} (${totalRows} แถว)`,
         "",
         csvText,
         "",
         `=== คำถาม ===`,
         query,
         "",
-        `=== คำสั่ง ===`,
-        "1. หาแถวที่ตรงกับคำถาม (ระบุปี/จังหวัด/หัวข้อ)",
-        "2. แสดงผลเป็น **Markdown table ครบทุกคอลัมน์** จาก CSV (อย่าตัดคอลัมน์)",
-        "3. Header ของ table ใช้ชื่อคอลัมน์เดิมจาก CSV (รวมเลขในวงเล็บ)",
-        "4. ถ้ามีหลายแถวตรงกัน ให้แสดงทุกแถวในตาราง (ไม่ pivot, ไม่รวม)",
-        "5. ถ้าหาไม่เจอ ให้พูดตรงๆ ว่า 'ไม่พบในไฟล์นี้'",
+        `=== สิ่งที่ต้องทำ ===`,
+        "1. สแกนหาแถวที่ Year + Province ตรงกับคำถาม",
+        "2. ถ้าเจอ → คัดลอกค่าทุกคอลัมน์ของแถวนั้นมาใส่ตาราง",
+        "3. Header ของตารางใช้ชื่อคอลัมน์เดิมจาก CSV ทุกคอลัมน์",
         "",
-        "ตัวอย่าง format ที่ถูกต้อง (แสดงครบทุกคอลัมน์):",
-        "  | Fiscal Year | Province | Population Aged 6-15 Years (1) | Prevalence Rate (2) | Estimated Number of Patients (3) | Cumulative Number of Patients (4) | Access Rate (5) | Patients Receiving Services (6) | Current Access Rate (7) | Registered Address Outside Province (8) |",
-        "  |-------------|----------|--------|------|------|------|------|------|------|------|",
-        "  | 2568 | อุบลราชธานี | 217674 | 2 | 4353 | 1763 | 40.5 | 633 | 14.54 | 14 |",
-        "  | 2569 | อุบลราชธานี | 212143 | 2 | 4242 | 1674 | 39.46 | 469 | 11.06 | ... |",
+        "ตัวอย่างผลลัพธ์ที่ถูกต้อง:",
         "",
-        "❌ ห้ามทำตารางสั้นแบบ 'รายการข้อมูล | ค่า' — ต้องเป็น table ปกติที่ column ละ field",
+        "| Fiscal Year | Province | Population Aged 6-15 Years (1) | Prevalence Rate (2) | Estimated Number of Patients (3) | Cumulative Number of Patients (4) | Access Rate (5) | Patients Receiving Services (6) | Current Access Rate (7) | Registered Address Outside Province (8) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+        "| 2568 | อุบลราชธานี | 217674 | 2 | 4353 | 1763 | 40.5 | 633 | 14.54 | 14 |",
+        "",
+        "(ค่า 2 ใน Prevalence Rate ใช้ '2' ไม่ใช่ '2%' หรือ '2.00%')",
       ].join("\n"),
     );
 
