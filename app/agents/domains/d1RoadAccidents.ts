@@ -12,9 +12,6 @@ const d1RoadAccidents: Agent = {
   tools: [
     { name: "find_and_analyze", description: "ค้นหาไฟล์ที่เหมาะสมแล้ว AI อ่านทั้งไฟล์และวิเคราะห์ในขั้นตอนเดียว — ใช้ก่อน!" },
     { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
-    { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
-    { name: "multi_csv_reader", description: "อ่านหลายไฟล์ CSV พร้อมกัน สำหรับข้อมูลหลายปี (2565-2569)" },
-    { name: "ai_csv_analyzer",  description: "ส่ง CSV ทั้งไฟล์ให้ AI วิเคราะห์ ไม่จำกัดแถว เหมาะกับไฟล์ merged หลายจังหวัด" },
     { name: "statistics_tool",      description: "วิเคราะห์สถิติอุบัติเหตุทางถนนรายปี รายจังหวัด" },
     { name: "data_analysis",        description: "วิเคราะห์แนวโน้มและรูปแบบการเกิดอุบัติเหตุ" },
     { name: "disease_surveillance", description: "ข้อมูลการบาดเจ็บและเสียชีวิตจากระบบเฝ้าระวัง" },
