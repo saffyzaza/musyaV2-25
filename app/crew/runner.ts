@@ -1,6 +1,7 @@
 import type { Crew, Task, TaskOutput, CrewOutput, Agent } from "@/app/agents/types";
 import { DOMAIN_AGENTS } from "@/app/agents/domains";
 import { EXECUTABLE_TOOLS } from "@/app/tools";
+import type { AIHelper } from "@/app/tools/types";
 
 export type PlannedAgent = { name: string; role: string };
 
@@ -165,6 +166,7 @@ async function executeWithTools(
   callMultiTurn: LLMMultiTurn,
   appUrl: string,
   models: ModelConfig,
+  toolAI: AIHelper,
   maxIterations = 5,
 ): Promise<{ rawOutput: string; toolsUsed: string[] }> {
   const agentModel = getAgentModel(agent.name, models);
@@ -198,8 +200,7 @@ async function executeWithTools(
       continue;
     }
 
-    // Execute the real tool — pass callAI helper so tools can use LLM if needed
-    const toolAI = (sys: string, usr: string) => callLLM(sys, usr, models.tool, 0.1);
+    // Execute the real tool — toolAI is injected from runCrew scope
     const result = await tool.execute(toolCall.args, appUrl, toolAI);
     toolsUsed.push(toolCall.name);
 
@@ -236,6 +237,9 @@ export async function* runCrew(
       .join("\n\n---\n\n");
     return callLLM(sys, combined, model, temperature);
   };
+
+  // AI helper for tools (cheap/fast model, low temp for data tasks)
+  const toolAI: AIHelper = (sys, usr) => callLLM(sys, usr, models.tool, 0.1);
 
   for (let taskIndex = 0; taskIndex < dynamicTasks.length; taskIndex++) {
     const task = dynamicTasks[taskIndex];
@@ -281,6 +285,7 @@ export async function* runCrew(
       callMultiTurn,
       appUrl,
       models,
+      toolAI,
     );
 
     const taskOutput = parseTaskOutput(currentTask, rawOutput, toolsUsed);
