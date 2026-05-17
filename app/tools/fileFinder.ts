@@ -70,15 +70,21 @@ const SYNONYM_MAP: Record<string, string[]> = {
   "หนองบัวลำภู":  ["nong_bua"],
   "นครพนม":       ["nakhon_phanom"],
   "สกลนคร":       ["sakon_nakhon"],
-  // Diseases
-  "ฆ่าตัวตาย":    ["suicide", "suicid", "self_harm"],
-  "พยายามฆ่าตัวตาย": ["suicide_attempt", "suicide_attempts", "attempt"],
-  อุบัติเหตุ:     ["accident", "road", "crash"],
-  มะเร็ง:         ["cancer"],
-  เบาหวาน:        ["diabetes"],
-  "ความดัน":      ["hypertension", "blood_pressure"],
-  ไต:             ["kidney", "renal"],
-  หัวใจ:          ["heart", "cardiac"],
+  // Diseases — include shortened/variant forms so LLM typos still match
+  "ฆ่าตัวตาย":        ["suicide", "suicid", "self_harm", "ฆ่าตาย"],
+  "ฆ่าตาย":           ["ฆ่าตัวตาย", "suicide", "suicid"],
+  "พยายามฆ่าตัวตาย": ["suicide_attempt", "suicide_attempts", "attempt", "พยายามฆ่าตาย", "พยายาม"],
+  "พยายามฆ่าตาย":     ["พยายามฆ่าตัวตาย", "suicide_attempt", "attempt"],
+  "พยายาม":           ["attempt", "พยายามฆ่าตัวตาย"],
+  อุบัติเหตุ:         ["accident", "road", "crash"],
+  มะเร็ง:             ["cancer"],
+  เบาหวาน:            ["diabetes"],
+  "ความดัน":          ["hypertension", "blood_pressure"],
+  ไต:                 ["kidney", "renal"],
+  หัวใจ:              ["heart", "cardiac"],
+  "โรคไต":            ["kidney", "renal", "ไต"],
+  "โรคเบาหวาน":       ["diabetes", "เบาหวาน"],
+  "โรคความดัน":       ["hypertension", "ความดัน"],
 };
 
 function pathMatches(fullPath: string, term: string): boolean {
@@ -145,10 +151,17 @@ const fileFinder: ExecutableTool = {
     const scored = csvFiles.map((f) => {
       const fullPath = `${f.path ?? ""}/${f.name}`;
 
-      // Domain + disease: mandatory match
-      const mandatoryTerms = [domain, disease].filter(Boolean);
-      const mandatoryMatch = mandatoryTerms.every((t) => pathMatches(fullPath, t));
-      if (!mandatoryMatch) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
+      // Domain: mandatory exact match
+      if (domain && !pathMatches(fullPath, domain))
+        return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
+
+      // Disease: match OR check if disease is a prefix/synonym of something in path
+      const diseaseMatch = !disease || pathMatches(fullPath, disease) ||
+        (disease.length >= 3 && norm(fullPath).split(/[/\\ ._-]/).some(
+          (part) => part.startsWith(norm(disease)) || norm(disease).startsWith(part.slice(0, 4))
+        ));
+
+      if (!diseaseMatch) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
 
       // Province: exact match (best) OR "all provinces" merged file (ok) OR fail
       const provinceMatch = !province || pathMatches(fullPath, province);
