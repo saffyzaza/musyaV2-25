@@ -84,10 +84,12 @@ function buildToolInstructions(agent: Agent): string {
     "── การใช้ Tool ──",
     "เมื่อต้องการค้นหาหรืออ่านข้อมูล ให้ระบุ [TOOL_CALL: ...] บนบรรทัดแยก แล้วรอรับ Tool result",
     "ขั้นตอน:",
-    "  ① file_finder(query='พยายามฆ่าตัวตาย จังหวัดยโสธร ปี 2024') ← AI วิเคราะห์ไฟล์ให้อัตโนมัติ",
-    "  ② ถ้าไฟล์เป็นแบบ merged/ทุกจังหวัด → ai_csv_analyzer(file_id='xxx', question='หาข้อมูลจ.ยโสธร ปี 2024 รวมทั้งหมด')",
-    "  ③ ถ้าไฟล์แยกตามปี → multi_csv_reader(file_ids='id1,id2,id3', filter_years='2024', filter_keyword='ยโสธร')",
-    "  ④ ถ้าไฟล์เดียวปีเดียว → csv_reader(file_id=..., filter_year='2024', filter_keyword='ยโสธร')",
+    "  วิธีที่ดีที่สุด (1 ขั้นตอน): find_and_analyze(query='คำถามเต็มๆ เช่น พยายามฆ่าตัวตาย จ.ยโสธร 2024 ชาย หญิง รวม')",
+    "  ← AI จะหาไฟล์ที่เหมาะสมและอ่านทั้งไฟล์ให้เองโดยอัตโนมัติ",
+    "",
+    "  หรือแยกขั้นตอน:",
+    "  ① file_finder(query='...') → ดูรายการไฟล์",
+    "  ② ai_csv_analyzer(file_id='xxx', question='...') → ส่งไฟล์เต็มให้ AI อ่าน",
     "รูปแบบ:",
     usageLines,
     "หลังได้ Tool result ครบแล้วให้ตอบโดยไม่ต้องเรียก tool อีก",
@@ -167,7 +169,7 @@ async function executeWithTools(
   appUrl: string,
   models: ModelConfig,
   toolAI: AIHelper,
-  maxIterations = 5,
+  maxIterations = 8,
 ): Promise<{ rawOutput: string; toolsUsed: string[] }> {
   const agentModel = getAgentModel(agent.name, models);
 

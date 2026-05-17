@@ -10,6 +10,7 @@ const d4Nutrition: Agent = {
     "มาตรฐาน WHO nutrition indicators, ภาวะ stunting/wasting/overweight " +
     "และการวิเคราะห์ pattern การบริโภคอาหารในกลุ่มต่างๆ ของประชากรไทย",
   tools: [
+    { name: "find_and_analyze", description: "ค้นหาไฟล์ที่เหมาะสมแล้ว AI อ่านทั้งไฟล์และวิเคราะห์ในขั้นตอนเดียว — ใช้ก่อน!" },
     { name: "file_finder", description: "ค้นหาไฟล์ CSV ใน MinIO ตาม domain/province/disease/year" },
     { name: "csv_reader",  description: "อ่าน CSV สแกน columns แล้ว filter ข้อมูลตามเงื่อนไข" },
     { name: "multi_csv_reader", description: "อ่านหลายไฟล์ CSV พร้อมกัน สำหรับข้อมูลหลายปี (2565-2569)" },

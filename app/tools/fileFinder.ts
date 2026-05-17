@@ -1,72 +1,19 @@
-import type { ExecutableTool, ToolArgs, ToolResult, AIHelper } from "./types";
+import type { ExecutableTool, ToolArgs, ToolResult } from "./types";
 
 type StoredFile = { id: string; name: string; path: string; extension: string; previewKind: string };
 
-type AIFileSelection = {
-  relevant_ids: string[];
-  reasoning: string;
-};
-
-// ─── AI-powered file analysis ─────────────────────────────────────────────────
-
-async function selectFilesWithAI(
-  files: StoredFile[],
-  query: string,
-  callAI: AIHelper,
-): Promise<AIFileSelection> {
-  const fileList = files
-    .map((f) => `ID: ${f.id} | path: ${f.path ?? ""}/${f.name}`)
-    .join("\n");
-
-  const raw = await callAI(
-    "คุณเป็น AI เลือกไฟล์ CSV ที่เกี่ยวข้องกับ query ตอบ JSON เท่านั้น ห้ามมีข้อความอื่น",
-    `Query ของผู้ใช้: "${query}"
-
-รายการไฟล์ CSV ทั้งหมดในระบบ:
-${fileList}
-
-วิเคราะห์ชื่อโฟลเดอร์ ชื่อไฟล์ และ path แล้วเลือกไฟล์ที่น่าจะมีข้อมูลตรงกับ query
-ถ้าไฟล์มีชื่อว่า "ทุกจังหวัด" หรือ "merged" หรือ "all_provinces" ให้รวมไว้ถ้า domain ตรง
-
-ตอบ JSON:
-{
-  "relevant_ids": ["ID ของไฟล์ที่เกี่ยวข้อง (ถ้าไม่มีให้ส่ง [])"],
-  "reasoning": "เหตุผลสั้นๆ ว่าเลือกไฟล์ไหนและทำไม"
-}`,
-  );
-
-  try {
-    const m = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/```\s*([\s\S]*?)\s*```/);
-    const parsed = JSON.parse(m ? m[1] : raw) as AIFileSelection;
-    return {
-      relevant_ids: Array.isArray(parsed.relevant_ids) ? parsed.relevant_ids : [],
-      reasoning: parsed.reasoning ?? "",
-    };
-  } catch {
-    // Fallback: try to extract IDs from raw text
-    const ids = [...raw.matchAll(/ID:\s*(\S+)/g)].map((m) => m[1].replace(/[",]/g, ""));
-    return { relevant_ids: ids.slice(0, 5), reasoning: "fallback extraction" };
-  }
-}
-
-// ─── Tool definition ──────────────────────────────────────────────────────────
+// ─── Simple file lister — return all CSV files, let the domain agent decide ───
 
 const fileFinder: ExecutableTool = {
   name: "file_finder",
   description:
-    "ใช้ AI วิเคราะห์รายชื่อไฟล์ CSV ทั้งหมดใน MinIO และเลือกไฟล์ที่เกี่ยวข้องกับ query อัตโนมัติ",
+    "แสดงรายการไฟล์ CSV ทั้งหมดใน MinIO กรองเฉพาะ domain ที่เกี่ยวข้อง",
   usage:
-    '[TOOL_CALL: file_finder(query="พยายามฆ่าตัวตาย จังหวัดยโสธร ปี 2024")]',
+    '[TOOL_CALL: file_finder(query="พยายามฆ่าตัวตาย ยโสธร 2024")]',
 
-  async execute(args: ToolArgs, appUrl: string, callAI?: AIHelper): Promise<ToolResult> {
-    const query = args.query || [args.disease, args.province, args.year, args.domain]
-      .filter(Boolean).join(" ");
+  async execute(args: ToolArgs, appUrl: string): Promise<ToolResult> {
+    const query = (args.query || [args.disease, args.province, args.year, args.domain].filter(Boolean).join(" ")).toLowerCase();
 
-    if (!query.trim()) {
-      return { success: false, data: "ต้องระบุ query หรือ disease/province/year" };
-    }
-
-    // 1. List all CSV files
     let files: StoredFile[] = [];
     try {
       const res = await fetch(`${appUrl}/api/files`);
@@ -77,50 +24,27 @@ const fileFinder: ExecutableTool = {
       return { success: false, data: "เกิดข้อผิดพลาดในการดึงรายการไฟล์" };
     }
 
-    if (files.length === 0) {
-      return { success: false, data: "ไม่พบไฟล์ CSV ในระบบ" };
-    }
+    if (files.length === 0) return { success: false, data: "ไม่พบไฟล์ CSV ในระบบ" };
 
-    // 2. AI selects relevant files
-    let selection: AIFileSelection = { relevant_ids: [], reasoning: "" };
+    // Simple keyword pre-filter (just domain/disease, not province/year)
+    // to reduce list size for the agent — but keep all if nothing matches
+    const keywords = query.split(/\s+/).filter((w) => w.length > 3);
+    let filtered = files.filter((f) => {
+      const p = `${f.path ?? ""}/${f.name}`.toLowerCase();
+      return keywords.some((k) => p.includes(k));
+    });
+    if (filtered.length === 0) filtered = files; // fallback: show all
 
-    if (callAI) {
-      selection = await selectFilesWithAI(files, query, callAI);
-    } else {
-      // Fallback: simple keyword match if no AI available
-      const qLower = query.toLowerCase();
-      const matched = files.filter((f) => {
-        const p = `${f.path ?? ""}/${f.name}`.toLowerCase();
-        return qLower.split(/\s+/).some((w) => w.length > 2 && p.includes(w));
-      });
-      selection = {
-        relevant_ids: matched.slice(0, 5).map((f) => f.id),
-        reasoning: "keyword fallback (ไม่มี AI helper)",
-      };
-    }
-
-    if (selection.relevant_ids.length === 0) {
-      const allPaths = files.slice(0, 20).map((f) => `${f.path}/${f.name}`).join("\n");
-      return {
-        success: false,
-        data:
-          `AI ไม่พบไฟล์ที่เกี่ยวข้องกับ: "${query}"\nเหตุผล: ${selection.reasoning}\n\nไฟล์ทั้งหมด:\n${allPaths}`,
-      };
-    }
-
-    // 3. Build result with matched file details
-    const matchedFiles = files.filter((f) => selection.relevant_ids.includes(f.id));
-    const lines = matchedFiles.map(
-      (f) => `- ID: ${f.id} | ชื่อ: ${f.name} | path: ${f.path}`,
+    const lines = filtered.map(
+      (f) => `- ID: ${f.id} | path: ${f.path}/${f.name}`,
     );
 
     return {
       success: true,
       data:
-        `AI เลือกไฟล์ที่เกี่ยวข้อง ${matchedFiles.length} ไฟล์:\n` +
-        `เหตุผล: ${selection.reasoning}\n\n` +
+        `พบ ${filtered.length} ไฟล์ CSV ที่เกี่ยวข้อง:\n` +
         lines.join("\n") +
-        `\n\n→ ส่ง IDs ให้ multi_csv_reader: ${matchedFiles.map((f) => f.id).join(",")}`,
+        `\n\n→ เลือก file_id ที่เหมาะสมแล้วใช้ ai_csv_analyzer(file_id="...", question="...")`,
     };
   },
 };
