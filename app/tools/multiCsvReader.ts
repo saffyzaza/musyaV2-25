@@ -177,6 +177,32 @@ const multiCsvReader: ExecutableTool = {
       const sourceName = meta?.name ?? `ID:${file_id}`;
       const fileUrl = `/api/files/${file_id}`;
 
+      // Auto-aggregate: if CSV has province+year columns, sum numeric cols per (province,year)
+      const provinceIdx = headers.findIndex((h) => /province|จังหวัด|province/i.test(h));
+      const yearIdx     = headers.findIndex((h) => /^year$|^ปี$/i.test(h));
+      const totalIdx    = headers.findIndex((h) => /^total$|^รวม$/i.test(h));
+
+      let aggregatedSummary = "";
+      if (provinceIdx >= 0 && yearIdx >= 0 && totalIdx >= 0 && filtered.length > 0) {
+        const aggMap = new Map<string, number>();
+        for (const row of filtered) {
+          const cells = splitLine(row);
+          const prov = cells[provinceIdx]?.trim() ?? "?";
+          const yr   = cells[yearIdx]?.trim() ?? "?";
+          const key  = `${prov}|${yr}`;
+          const val  = parseFloat(cells[totalIdx] ?? "0") || 0;
+          aggMap.set(key, (aggMap.get(key) ?? 0) + val);
+        }
+        const aggLines = ["จังหวัด,ปี,รวมทั้งหมด (total)"];
+        for (const [key, sum] of aggMap) {
+          const [prov, yr] = key.split("|");
+          aggLines.push(`${prov},${yr},${sum}`);
+        }
+        aggregatedSummary =
+          `\n   📊 สรุปรวมต่อจังหวัด-ปี (AUTO-AGGREGATE จาก ${filtered.length} แถว):\n` +
+          aggLines.map((l) => `   ${l}`).join("\n");
+      }
+
       // Show first column unique values to help LLM understand province/data format
       const firstColValues = [...new Set(dataLines.map((l) => splitLine(l)[0]))].slice(0, 15);
 
@@ -184,10 +210,12 @@ const multiCsvReader: ExecutableTool = {
         `📄 ชื่อไฟล์: ${sourceName}\n` +
         `🔗 MARKDOWN_LINK (คัดลอกตรงนี้ลงในแหล่งที่มา): [${sourceName}](${fileUrl})\n` +
         `   คอลัมน์ (${headers.length}): ${headers.join(" | ")}\n` +
-        `   ค่าในคอลัมน์แรก (ตัวอย่าง): ${firstColValues.join(", ")}\n` +
-        `   ${note} → ${filtered.length} แถว (จาก ${dataLines.length} ทั้งหมด)\n` +
+        `   ค่าในคอลัมน์แรก: ${firstColValues.join(", ")}\n` +
+        `   ${note} → ${filtered.length} แถว (จาก ${dataLines.length} ทั้งหมด)` +
+        aggregatedSummary + "\n" +
+        `   ข้อมูลดิบ:\n` +
         `   ${headers.join(",")}\n` +
-        filtered.slice(0, 150).map((r) => `   ${r}`).join("\n"),
+        filtered.slice(0, 100).map((r) => `   ${r}`).join("\n"),
       );
     }
 
