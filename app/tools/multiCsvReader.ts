@@ -5,17 +5,37 @@ type FileMeta = { id: string; name: string; path: string };
 const splitLine = (line: string) =>
   line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
 
+function ceToThai(y: number) { return y + 543; }
+function thaiToCE(y: number) { return y - 543; }
+
 function buildYearFilter(filter_years: string): ((row: string) => boolean) | null {
   if (!filter_years) return null;
+
+  const allYears: string[] = [];
+
   const rangeMatch = filter_years.match(/^(\d{4})-(\d{4})$/);
   if (rangeMatch) {
     const from = parseInt(rangeMatch[1]);
     const to   = parseInt(rangeMatch[2]);
-    const years = Array.from({ length: to - from + 1 }, (_, i) => String(from + i));
-    return (row) => years.some((y) => row.includes(y));
+    for (let y = from; y <= to; y++) {
+      allYears.push(String(y));
+      const other = y > 2100 ? thaiToCE(y) : ceToThai(y);
+      allYears.push(String(other));
+    }
+  } else {
+    const list = filter_years.split(",").map((s) => s.trim()).filter(Boolean);
+    for (const y of list) {
+      allYears.push(y);
+      const n = parseInt(y);
+      if (!isNaN(n)) {
+        const other = n > 2100 ? thaiToCE(n) : ceToThai(n);
+        allYears.push(String(other));
+      }
+    }
   }
-  const list = filter_years.split(",").map((s) => s.trim()).filter(Boolean);
-  return list.length > 0 ? (row) => list.some((y) => row.includes(y)) : null;
+
+  const unique = [...new Set(allYears)];
+  return unique.length > 0 ? (row) => unique.some((y) => row.includes(y)) : null;
 }
 
 // Smart filter with fallback:
