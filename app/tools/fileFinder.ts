@@ -1,215 +1,126 @@
-import type { ExecutableTool, ToolArgs, ToolResult } from "./types";
+import type { ExecutableTool, ToolArgs, ToolResult, AIHelper } from "./types";
 
 type StoredFile = { id: string; name: string; path: string; extension: string; previewKind: string };
 
-const norm = (s: string) => s.toLowerCase().trim();
-
-// ─── Year helpers ─────────────────────────────────────────────────────────────
-
-// Convert CE ↔ BE (Thai): 2024 CE = 2567 BE
-function ceToThai(y: number) { return y + 543; }
-function thaiToCE(y: number) { return y - 543; }
-
-// Expand a year (single or range) to all relevant year strings (CE + BE)
-function expandYears(year: string): string[] {
-  if (!year) return [];
-
-  const range = year.match(/^(\d{4})-(\d{4})$/);
-  if (range) {
-    const from = parseInt(range[1]);
-    const to   = parseInt(range[2]);
-    const years: string[] = [];
-    for (let y = from; y <= to; y++) {
-      years.push(String(y));
-      // Add the other calendar system variant
-      const other = y > 2100 ? thaiToCE(y) : ceToThai(y);
-      years.push(String(other));
-    }
-    return [...new Set(years)];
-  }
-
-  const y = parseInt(year);
-  if (isNaN(y)) return [year];
-  const other = y > 2100 ? thaiToCE(y) : ceToThai(y);
-  return [String(y), String(other)];
-}
-
-// Check if the filename contains a year RANGE (e.g. "2022_2025" or "2022-2025")
-// and the target year falls within that range
-function yearInFileRange(fullPath: string, yearStr: string): boolean {
-  const y = parseInt(yearStr);
-  if (isNaN(y)) return false;
-
-  const rangeMatch = fullPath.match(/(\d{4})[_-](\d{4})/);
-  if (!rangeMatch) return false;
-
-  const from = parseInt(rangeMatch[1]);
-  const to   = parseInt(rangeMatch[2]);
-  // Handle both CE and BE: try direct match and cross-calendar match
-  const otherY = y > 2100 ? thaiToCE(y) : ceToThai(y);
-  return (y >= from && y <= to) || (otherY >= from && otherY <= to);
-}
-
-// ─── Province / disease synonyms ─────────────────────────────────────────────
-
-const SYNONYM_MAP: Record<string, string[]> = {
-  // Provinces
-  อุบล:           ["อุบลราชธานี", "ubon"],
-  มุกดาหาร:       ["mukdahan"],
-  "ขอนแก่น":      ["khon_kaen", "khonkaen"],
-  "เชียงใหม่":    ["chiangmai", "chiang_mai"],
-  กทม:            ["กรุงเทพ", "bangkok"],
-  "นครราชสีมา":   ["nakhon", "korat"],
-  "อำนาจเจริญ":   ["amnat", "amnatcharoen"],
-  "ศรีสะเกษ":     ["sisaket", "si_saket"],
-  "ยโสธร":        ["yasothon"],
-  "ร้อยเอ็ด":     ["roi_et", "roiet"],
-  "สุรินทร์":     ["surin"],
-  "บุรีรัมย์":    ["buriram"],
-  "ชัยภูมิ":      ["chaiyaphum"],
-  "หนองบัวลำภู":  ["nong_bua"],
-  "นครพนม":       ["nakhon_phanom"],
-  "สกลนคร":       ["sakon_nakhon"],
-  // Diseases — include shortened/variant forms so LLM typos still match
-  "ฆ่าตัวตาย":        ["suicide", "suicid", "self_harm", "ฆ่าตาย"],
-  "ฆ่าตาย":           ["ฆ่าตัวตาย", "suicide", "suicid"],
-  "พยายามฆ่าตัวตาย": ["suicide_attempt", "suicide_attempts", "attempt", "พยายามฆ่าตาย", "พยายาม"],
-  "พยายามฆ่าตาย":     ["พยายามฆ่าตัวตาย", "suicide_attempt", "attempt"],
-  "พยายาม":           ["attempt", "พยายามฆ่าตัวตาย"],
-  อุบัติเหตุ:         ["accident", "road", "crash"],
-  มะเร็ง:             ["cancer"],
-  เบาหวาน:            ["diabetes"],
-  "ความดัน":          ["hypertension", "blood_pressure"],
-  ไต:                 ["kidney", "renal"],
-  หัวใจ:              ["heart", "cardiac"],
-  "โรคไต":            ["kidney", "renal", "ไต"],
-  "โรคเบาหวาน":       ["diabetes", "เบาหวาน"],
-  "โรคความดัน":       ["hypertension", "ความดัน"],
+type AIFileSelection = {
+  relevant_ids: string[];
+  reasoning: string;
 };
 
-function pathMatches(fullPath: string, term: string): boolean {
-  const p = norm(fullPath);
-  const t = norm(term);
-  if (p.includes(t)) return true;
+// ─── AI-powered file analysis ─────────────────────────────────────────────────
 
-  // Check synonyms
-  for (const [key, synonyms] of Object.entries(SYNONYM_MAP)) {
-    if (t === norm(key)) {
-      return synonyms.some((s) => p.includes(norm(s)));
-    }
-    // Reverse: if term is an English synonym, match Thai key
-    if (synonyms.some((s) => t === norm(s))) {
-      return p.includes(norm(key)) || synonyms.some((s) => p.includes(norm(s)));
-    }
-  }
-  return false;
-}
+async function selectFilesWithAI(
+  files: StoredFile[],
+  query: string,
+  callAI: AIHelper,
+): Promise<AIFileSelection> {
+  const fileList = files
+    .map((f) => `ID: ${f.id} | path: ${f.path ?? ""}/${f.name}`)
+    .join("\n");
 
-// ─── Detect "all provinces" / merged files ───────────────────────────────────
+  const raw = await callAI(
+    "คุณเป็น AI เลือกไฟล์ CSV ที่เกี่ยวข้องกับ query ตอบ JSON เท่านั้น ห้ามมีข้อความอื่น",
+    `Query ของผู้ใช้: "${query}"
 
-function isAllProvincesFile(fullPath: string): boolean {
-  const p = norm(fullPath);
-  return (
-    p.includes("ทุกจังหวัด") ||
-    p.includes("all_province") ||
-    p.includes("all_provinces") ||
-    p.includes("all-province") ||
-    p.includes("merged") ||
-    p.includes("5_province") ||
-    p.includes("รวมทุก") ||
-    p.includes("ทุกพื้นที่")
+รายการไฟล์ CSV ทั้งหมดในระบบ:
+${fileList}
+
+วิเคราะห์ชื่อโฟลเดอร์ ชื่อไฟล์ และ path แล้วเลือกไฟล์ที่น่าจะมีข้อมูลตรงกับ query
+ถ้าไฟล์มีชื่อว่า "ทุกจังหวัด" หรือ "merged" หรือ "all_provinces" ให้รวมไว้ถ้า domain ตรง
+
+ตอบ JSON:
+{
+  "relevant_ids": ["ID ของไฟล์ที่เกี่ยวข้อง (ถ้าไม่มีให้ส่ง [])"],
+  "reasoning": "เหตุผลสั้นๆ ว่าเลือกไฟล์ไหนและทำไม"
+}`,
   );
+
+  try {
+    const m = raw.match(/```json\s*([\s\S]*?)\s*```/) || raw.match(/```\s*([\s\S]*?)\s*```/);
+    const parsed = JSON.parse(m ? m[1] : raw) as AIFileSelection;
+    return {
+      relevant_ids: Array.isArray(parsed.relevant_ids) ? parsed.relevant_ids : [],
+      reasoning: parsed.reasoning ?? "",
+    };
+  } catch {
+    // Fallback: try to extract IDs from raw text
+    const ids = [...raw.matchAll(/ID:\s*(\S+)/g)].map((m) => m[1].replace(/[",]/g, ""));
+    return { relevant_ids: ids.slice(0, 5), reasoning: "fallback extraction" };
+  }
 }
 
 // ─── Tool definition ──────────────────────────────────────────────────────────
 
 const fileFinder: ExecutableTool = {
   name: "file_finder",
-  description: "ค้นหาไฟล์ CSV ใน MinIO รองรับ year range, CE↔BE แปลงอัตโนมัติ และ province/disease synonyms",
+  description:
+    "ใช้ AI วิเคราะห์รายชื่อไฟล์ CSV ทั้งหมดใน MinIO และเลือกไฟล์ที่เกี่ยวข้องกับ query อัตโนมัติ",
   usage:
-    '[TOOL_CALL: file_finder(domain="D2_Mental_Health", province="มุกดาหาร", disease="พยายามฆ่าตัวตาย", year="2024")]',
+    '[TOOL_CALL: file_finder(query="พยายามฆ่าตัวตาย จังหวัดยโสธร ปี 2024")]',
 
-  async execute(args: ToolArgs, appUrl: string): Promise<ToolResult> {
-    const { domain, province, disease, year } = args;
+  async execute(args: ToolArgs, appUrl: string, callAI?: AIHelper): Promise<ToolResult> {
+    const query = args.query || [args.disease, args.province, args.year, args.domain]
+      .filter(Boolean).join(" ");
 
+    if (!query.trim()) {
+      return { success: false, data: "ต้องระบุ query หรือ disease/province/year" };
+    }
+
+    // 1. List all CSV files
     let files: StoredFile[] = [];
     try {
       const res = await fetch(`${appUrl}/api/files`);
       if (!res.ok) return { success: false, data: "ไม่สามารถเข้าถึงรายการไฟล์ได้" };
-      files = (await res.json()) as StoredFile[];
+      const all = (await res.json()) as StoredFile[];
+      files = all.filter((f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv");
     } catch {
-      return { success: false, data: "เกิดข้อผิดพลาดในการเชื่อมต่อ API" };
+      return { success: false, data: "เกิดข้อผิดพลาดในการดึงรายการไฟล์" };
     }
 
-    const csvFiles = files.filter(
-      (f) => f.previewKind === "csv" || f.extension?.toLowerCase() === "csv",
-    );
+    if (files.length === 0) {
+      return { success: false, data: "ไม่พบไฟล์ CSV ในระบบ" };
+    }
 
-    const yearTerms = expandYears(year ?? "");
-    const baseTerms = [domain, province, disease].filter(Boolean);
+    // 2. AI selects relevant files
+    let selection: AIFileSelection = { relevant_ids: [], reasoning: "" };
 
-    const scored = csvFiles.map((f) => {
-      const fullPath = `${f.path ?? ""}/${f.name}`;
-
-      // Domain: mandatory exact match
-      if (domain && !pathMatches(fullPath, domain))
-        return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
-
-      // Disease: match OR check if disease is a prefix/synonym of something in path
-      const diseaseMatch = !disease || pathMatches(fullPath, disease) ||
-        (disease.length >= 3 && norm(fullPath).split(/[/\\ ._-]/).some(
-          (part) => part.startsWith(norm(disease)) || norm(disease).startsWith(part.slice(0, 4))
-        ));
-
-      if (!diseaseMatch) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
-
-      // Province: exact match (best) OR "all provinces" merged file (ok) OR fail
-      const provinceMatch = !province || pathMatches(fullPath, province);
-      const allProvinces  = !provinceMatch && isAllProvincesFile(fullPath);
-      if (!provinceMatch && !allProvinces) return { f, fullPath, score: 0, yearMatch: false, rangeMatch: false };
-
-      // Year matching: exact OR within filename range
-      const yearExact  = yearTerms.length === 0 || yearTerms.some((y) => pathMatches(fullPath, y));
-      const rangeMatch = yearTerms.length > 0 && yearTerms.some((y) => yearInFileRange(fullPath, y));
-      const yearMatch  = yearExact || rangeMatch;
-
-      const score =
-        mandatoryTerms.filter((t) => pathMatches(fullPath, t)).length +
-        (provinceMatch ? 2 : allProvinces ? 1 : 0) +   // province weight
-        (yearExact ? 2 : rangeMatch ? 1 : 0);           // year weight
-
-      return { f, fullPath, score, yearMatch, rangeMatch };
-    });
-
-    const best = scored
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    if (best.length === 0) {
-      const allCsvPaths = csvFiles.slice(0, 20).map((f) => `${f.path}/${f.name}`).join("\n");
-      return {
-        success: false,
-        data:
-          `ไม่พบไฟล์: domain="${domain}" province="${province}" disease="${disease}" year="${year}" (ลอง CE+BE: ${yearTerms.join(",")})\n` +
-          `ไฟล์ CSV ที่มีในระบบ:\n${allCsvPaths}`,
+    if (callAI) {
+      selection = await selectFilesWithAI(files, query, callAI);
+    } else {
+      // Fallback: simple keyword match if no AI available
+      const qLower = query.toLowerCase();
+      const matched = files.filter((f) => {
+        const p = `${f.path ?? ""}/${f.name}`.toLowerCase();
+        return qLower.split(/\s+/).some((w) => w.length > 2 && p.includes(w));
+      });
+      selection = {
+        relevant_ids: matched.slice(0, 5).map((f) => f.id),
+        reasoning: "keyword fallback (ไม่มี AI helper)",
       };
     }
 
-    const lines = best.map((s) => {
-      const tag = s.rangeMatch ? " ✓ปีอยู่ใน range ของไฟล์" : s.yearMatch ? " ✓ปีตรง" : "";
-      return `- ID: ${s.f.id} | ชื่อ: ${s.f.name} | path: ${s.f.path}${tag}`;
-    });
+    if (selection.relevant_ids.length === 0) {
+      const allPaths = files.slice(0, 20).map((f) => `${f.path}/${f.name}`).join("\n");
+      return {
+        success: false,
+        data:
+          `AI ไม่พบไฟล์ที่เกี่ยวข้องกับ: "${query}"\nเหตุผล: ${selection.reasoning}\n\nไฟล์ทั้งหมด:\n${allPaths}`,
+      };
+    }
 
-    const ceBeNote = yearTerms.length > 0
-      ? ` (ค้นทั้ง CE+BE: ${yearTerms.join(",")})`
-      : "";
+    // 3. Build result with matched file details
+    const matchedFiles = files.filter((f) => selection.relevant_ids.includes(f.id));
+    const lines = matchedFiles.map(
+      (f) => `- ID: ${f.id} | ชื่อ: ${f.name} | path: ${f.path}`,
+    );
 
     return {
       success: true,
       data:
-        `พบ ${best.length} ไฟล์${ceBeNote}:\n` +
+        `AI เลือกไฟล์ที่เกี่ยวข้อง ${matchedFiles.length} ไฟล์:\n` +
+        `เหตุผล: ${selection.reasoning}\n\n` +
         lines.join("\n") +
-        `\n\n→ ส่ง IDs ทั้งหมดให้ multi_csv_reader: ${best.map((s) => s.f.id).join(",")}`,
+        `\n\n→ ส่ง IDs ให้ multi_csv_reader: ${matchedFiles.map((f) => f.id).join(",")}`,
     };
   },
 };

@@ -83,9 +83,9 @@ function buildToolInstructions(agent: Agent): string {
     "── การใช้ Tool ──",
     "เมื่อต้องการค้นหาหรืออ่านข้อมูล ให้ระบุ [TOOL_CALL: ...] บนบรรทัดแยก แล้วรอรับ Tool result",
     "ขั้นตอน:",
-    "  ① file_finder(domain=... province=... disease=... year='2565-2567') ← ใส่ range ได้เลย จะหาไฟล์ทุกปีในช่วงนั้น",
-    "  ② นำ IDs ทั้งหมดที่ได้ → multi_csv_reader(file_ids='id1,id2,id3', filter_years='2565-2567')",
-    "  ③ ถ้าต้องการปีเดียว ใช้ csv_reader(file_id=...) แทน multi_csv_reader",
+    "  ① file_finder(query='พยายามฆ่าตัวตาย จังหวัดยโสธร ปี 2024') ← AI วิเคราะห์ไฟล์ให้อัตโนมัติ",
+    "  ② นำ IDs ทั้งหมดที่ได้ → multi_csv_reader(file_ids='id1,id2,id3', filter_years='2024', filter_keyword='ยโสธร')",
+    "  ③ ถ้าต้องการปีเดียวหรือไฟล์เดียว ใช้ csv_reader(file_id=...) แทน",
     "รูปแบบ:",
     usageLines,
     "หลังได้ Tool result ครบแล้วให้ตอบโดยไม่ต้องเรียก tool อีก",
@@ -197,8 +197,9 @@ async function executeWithTools(
       continue;
     }
 
-    // Execute the real tool
-    const result = await tool.execute(toolCall.args, appUrl);
+    // Execute the real tool — pass callAI helper so tools can use LLM if needed
+    const toolAI = (sys: string, usr: string) => callLLM(sys, usr, models.tool, 0.1);
+    const result = await tool.execute(toolCall.args, appUrl, toolAI);
     toolsUsed.push(toolCall.name);
 
     // Feed result back into conversation
